@@ -1,0 +1,1 @@
+psql "postgresql://postgres:[YOUR-PASSWORD]@aws-1-us-east-2.pooler.supabase.com:5432/postgres" -f your_backup_file.sql
