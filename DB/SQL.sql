@@ -9,17 +9,16 @@
 );
 
 
-CREATE TABLE IF NOT EXISTS public.carousel (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  created_at timestamptz NOT NULL DEFAULT now(),
-  name text NULL DEFAULT ''::text,
-  image text[] NULL DEFAULT '{}'::text[],
-  description text NULL,
-  linkedPath text NULL DEFAULT ''::text,
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT carousel_pkey PRIMARY KEY (id)
+create table IF NOT EXISTS public.carousel (
+  id uuid not null default gen_random_uuid (),
+  created_at timestamp with time zone not null default now(),
+  name text null default ''::text,
+  image text[] null default '{}'::text[],
+  description text null,
+  linkedPath text null default ''::text,
+  updated_at timestamp with with time zone not null default now(),
+  constraint carousel_pkey primary key (id)
 ) TABLESPACE pg_default;
-
 
 CREATE TABLE IF NOT EXISTS profiles (
   id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
@@ -84,7 +83,6 @@ CREATE TABLE IF NOT EXISTS items (
     ON DELETE CASCADE, 
   name text,
   description text,
-  short_description text,
   isdisabled boolean default false,
   galleryUrls text[], 
   brands_ids text[], 
@@ -93,7 +91,6 @@ CREATE TABLE IF NOT EXISTS items (
   updated_at timestamp default now(),
   search_vector tsvector 
 );
-
 
 CREATE TABLE variants (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -165,23 +162,7 @@ create table public.comments (
     references profiles(id) on delete cascade
 );
 
-
--- Orders table (COD flow)
-create table if not exists orders (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users(id) on delete set null,
-  status text not null default 'pending' check (status in ('pending','confirmed','cancelled','delivered')),
-  total_amount numeric(10,2) not null,
-  shipping_name text,
-  shipping_phone text,                 -- store E.164 (+961...)
-  shipping_address text,
-  shipping_city text,
-  note text,
-  created_at timestamp default now()
-);
-
-
-create table if not exists order_items (
+create table order_items (
   id uuid primary key default gen_random_uuid(),
   order_id uuid not null references orders(id) on delete cascade,
   item_id uuid not null,
@@ -260,7 +241,7 @@ begin
 end;
 $$;
 
--- drop trigger trg_update_item_rating_stats;
+drop trigger trg_update_item_rating_stats;
 
 create trigger trg_update_item_rating_stats
 after insert or update or delete on ratings
@@ -435,6 +416,20 @@ JOIN types t ON t.id = m.type_id
 JOIN categories c ON c.id = t.category_id;
 
 
+-- Orders table (COD flow)
+create table if not exists orders (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete set null,
+  status text not null default 'pending' check (status in ('pending','confirmed','cancelled','delivered')),
+  total_amount numeric(10,2) not null,
+  shipping_name text,
+  shipping_phone text,                 -- store E.164 (+961...)
+  shipping_address text,
+  shipping_city text,
+  note text,
+  created_at timestamp default now()
+);
+
 -- CREATE OR REPLACE VIEW category_full_view AS
 -- SELECT 
 --   c.id AS category_id,
@@ -601,69 +596,52 @@ begin
     end if;
 end;
 $$;
-
 create or replace function remove_order_item_admin(
     p_order_id uuid,
-    p_item_id text
+    p_item_id uuid
 )
 returns void
 language plpgsql
+security definer
 as $$
 declare
-    v_order record;
-    v_removed_item jsonb;
-    v_updated_items jsonb;
-    v_new_total numeric := 0;
+    v_qty integer;
+    v_price numeric;
+    v_sku text;
+    v_new_total numeric;
 begin
-    -- Lock order row
-    select *
-    into v_order
-    from orders
-    where id = p_order_id
-    for update;
+
+    -- 1️⃣ Get item info
+    select qty, price, sku
+    into v_qty, v_price, v_sku
+    from order_items
+    where order_id = p_order_id
+      and item_id = p_item_id;
 
     if not found then
-        raise exception 'Order not found';
-    end if;
-
-    -- Find removed item
-    select value
-    into v_removed_item
-    from jsonb_array_elements(v_order.items) value
-    where value->>'item_id' = p_item_id;
-
-    if v_removed_item is null then
         raise exception 'Item not found in order';
     end if;
 
-    -- Remove item from array
-    select jsonb_agg(value)
-    into v_updated_items
-    from jsonb_array_elements(v_order.items) value
-    where value->>'item_id' <> p_item_id;
-
-    if v_updated_items is null then
-        v_updated_items := '[]'::jsonb;
-    end if;
-
-    -- Recalculate total
-    select coalesce(sum(
-        (value->>'price')::numeric *
-        coalesce((value->>'qty')::numeric, 1)
-    ), 0)
-    into v_new_total
-    from jsonb_array_elements(v_updated_items) value;
-
-    -- Restore stock
+    -- 2️⃣ Restore stock
     perform increment_stock(
-        v_removed_item->>'sku',
-        (v_removed_item->>'qty')::integer
+        v_sku,
+        v_qty
     );
 
-    -- Update order
+    -- 3️⃣ Delete item row
+    delete from order_items
+    where order_id = p_order_id
+      and item_id = p_item_id;
+
+    -- 4️⃣ Recalculate order total
+    select coalesce(sum(qty * price), 0)
+    into v_new_total
+    from order_items
+    where order_id = p_order_id;
+
+    -- 5️⃣ Update order
     update orders
-    set items = v_updated_items,
-        total_amount = v_new_total,
+    set total_amount = v_new_total,
         updated_at = now()
     where id = p_order_id;
 

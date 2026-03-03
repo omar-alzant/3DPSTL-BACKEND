@@ -6,25 +6,38 @@ import { sendOrderConfirmation } from '../services/whatsapp.js';
 
 const router = express.Router();
 
-// GET /api/admin/orders - Get all orders for the dashboard
+/// GET /api/orders/admin/all
 router.get('/admin/all', authMiddleware, async (req, res) => {
   try {
-    // 1. Check Admin Status
+    // 1️⃣ Check Admin Status
     const { data: profile } = await supabaseAdmin
       .from('profiles')
       .select('is_Admin')
       .eq('id', req.id)
       .single();
 
-    if (!profile?.is_Admin) return res.status(403).json({ error: "Unauthorized" });
+    if (!profile?.is_Admin)
+      return res.status(403).json({ error: "Unauthorized" });
 
-    // 2. Fetch all orders with newest first
+    // 2️⃣ Fetch orders WITH items
     const { data: orders, error } = await supabaseAdmin
       .from('orders')
-      .select('*')
+      .select(`
+        *,
+        items:order_items (
+          id,
+          item_id,
+          product_name,
+          size,
+          color,
+          qty,
+          price
+        )
+      `)
       .order('updated_at', { ascending: false });
 
     if (error) throw error;
+
     res.json(orders);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -199,8 +212,9 @@ router.post('/', authMiddleware, async (req, res) => {
     }
 
     res.status(201).json({
-      orderId: order.id,
-      // order
+      // orderId: order.id,
+      order: order,
+      items: orderItemRows
     });
 
   } catch (e) {
