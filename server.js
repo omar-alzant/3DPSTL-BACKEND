@@ -17,7 +17,7 @@ import backupRouter from "./routes/backup.js";
 dotenv.config(); // must be first!
 
 const app = express();
-// const allowedOrigins = ["https://www.libanbebe.com","https://libanbebe.com", "http://localhost:3000"];
+// const allowedOrigins = ["https://www.3dpstl.com","https://3dpstl.com", "http://localhost:3000"];
 const allowedOrigins = process.env.CORS_ORIGINS.split(",");
 
 

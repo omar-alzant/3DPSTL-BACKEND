@@ -12,7 +12,7 @@ router.get('/', async (req, res) => {
     res.header('Content-Encoding', 'gzip');
 
 
-    const smStream = new SitemapStream({ hostname: 'https://libanbebe.com' });
+    const smStream = new SitemapStream({ hostname: 'https://3dpstl.com' });
     // 
     // const smStream = new SitemapStream({ hostname: 'http://localhost:3000' });
     const pipeline = smStream.pipe(zlib.createGzip());

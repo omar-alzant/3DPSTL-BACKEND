@@ -9,7 +9,7 @@ import jwt from  'jsonwebtoken';
 // const port = "http://localhost:3000";
 
 
-const port = "https://www.libanbebe.com"
+const port = "https://www.3dpstl.com"
 
 const router = express.Router();
 
@@ -138,7 +138,7 @@ router.post('/register', async (req, res) => {
           password,
             options: 
             {
-              emailRedirectTo: 'https://www.libanbebe.com/auth/callback'
+              emailRedirectTo: 'https://www.3dpstl.com/auth/callback'
             }
       });
       
@@ -252,7 +252,7 @@ router.post('/updatePwd', authMiddleware, async (req, res) => {
       // 2️⃣ Email exists -> proceed with reset
       const { data: updateData, error: updateError } = await supabaseAnon.auth.resetPasswordForEmail(
       email.trim(),
-      { redirectTo: 'https://www.libanbebe.com/update-password' }
+      { redirectTo: 'https://www.3dpstl.com/update-password' }
     );
 
     if (updateError) {
