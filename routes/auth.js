@@ -50,7 +50,7 @@ router.put("/password", authMiddleware, async (req, res) => {
     {
       id: userId,
       email: data.user.email,
-      isAdmin: profile.is_Admin
+      isAdmin: profile.is_admin
     },
     process.env.JWT_SECRET,
     { expiresIn: '24h' }
@@ -101,11 +101,11 @@ router.post('/confirm-login', async (req, res) => {
     // Fetch profile / role
     const { data: profile } = await supabaseAdmin
       .from('profiles')
-      .select('is_Admin')
+      .select('is_admin')
       .eq('id', userId)
       .single();
 
-    const isAdmin = !!profile?.is_Admin;
+    const isAdmin = !!profile?.is_admin;
 
     // Issue YOUR JWT
     const appToken = jwt.sign(
@@ -191,7 +191,7 @@ router.post('/updatePwd', authMiddleware, async (req, res) => {
     // Get profile
     const { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
-      .select('is_Admin')
+      .select('is_admin')
       .eq('id', userId)
       .single();
 
@@ -203,7 +203,7 @@ router.post('/updatePwd', authMiddleware, async (req, res) => {
       {
         id: userId,
         email: data.user.email,
-        isAdmin: profile.is_Admin
+        isAdmin: profile.is_admin
       },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
@@ -350,7 +350,7 @@ router.post('/updatePwd', authMiddleware, async (req, res) => {
       { 
         id: loginData.user.id, 
         email, 
-        isAdmin: profile.is_Admin 
+        isAdmin: profile.is_admin 
       }, 
       process.env.JWT_SECRET, 
       { expiresIn: '24h' }
@@ -372,7 +372,7 @@ const updatedAt = new Date().toISOString();  
       message: 'Login successful', 
       token: token, 
       email: loginData.user.email, // Explicitly pass email
-      isAdmin: profile.is_Admin, // Use the isAdmin value from the fetched profile
+      isAdmin: profile.is_admin, // Use the isAdmin value from the fetched profile
       profile: profile // Pass the full profile object fetched in step 2
   });
   } catch (err) {
