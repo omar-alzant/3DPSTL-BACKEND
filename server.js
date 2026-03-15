@@ -13,6 +13,7 @@ import whatsappWebhook from'./routes/webhook.whatsapp.js';
 import dotenv from 'dotenv';
 import sitemapRouter from './routes/sitemap.js';
 import backupRouter from "./routes/backup.js";
+import filamentColorsRouter from "./routes/adminFilamentColors.js";
 
 dotenv.config(); // must be first!
 
@@ -57,6 +58,7 @@ app.use('/api/auth', auth);
 app.use('/api/home', HomeRoutes);
 app.use("/api/category", categoryRouter);
 app.use("/api/admin/backup", backupRouter);
+app.use("/api/admin/filament/colors", filamentColorsRouter);
 
 // WhatsApp webhook endpoints
 app.use('/webhook/whatsapp', whatsappWebhook);

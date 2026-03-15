@@ -176,6 +176,40 @@ create table order_items (
 );
 
 
+CREATE TABLE filament_materials (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL UNIQUE,
+  description TEXT,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+
+CREATE TABLE filament_brands (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL UNIQUE,
+  website TEXT,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+
+CREATE TABLE filament_colors (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  name TEXT NOT NULL,
+  hex TEXT NOT NULL,
+
+  material_id UUID REFERENCES filament_materials(id) ON DELETE CASCADE,
+  brand_id UUID REFERENCES filament_brands(id) ON DELETE SET NULL,
+
+  stock INTEGER DEFAULT 0,
+  active BOOLEAN DEFAULT TRUE,
+
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+ALTER TABLE filament_colors
+ADD CONSTRAINT unique_color_material
+UNIQUE(name, material_id, brand_id);
 
 create or replace function get_related_items_by_type(
   p_item_id uuid,
