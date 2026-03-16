@@ -5,7 +5,7 @@ import { authMiddleware } from '../middleware/auth.js';
 
 const router = express.Router();
 
-router.get("/", authMiddleware, async (req, res) => {
+router.get("/", async (req, res) => {
 
     const { data, error } = await supabaseAdmin
       .from("filament_colors")
