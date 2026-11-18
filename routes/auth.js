@@ -269,19 +269,14 @@ router.post('/updatePwd', authMiddleware, async (req, res) => {
   }
   });
 
+  // تسجيل الخروج من كل الأجهزة: يجب إثبات ملكية الحساب بالبريد وكلمة المرور
+  // (الحماية من البرامج الآلية يقوم بها التحقق البشري Cloudflare Turnstile على كل طلبات /api)
   router.post('/logoutAlldevices', async (req, res) => {
-    const { email, recaptchaToken } = req.body;
+    const { email, password } = req.body || {};
     try {
-      // Try signing in to verify credentials
-    const response = await fetch(
-      `https://www.google.com/recaptcha/api/siteverify?secret=${process.env.RECAPTCHA_SECRET_KEY}&response=${recaptchaToken}`,
-      { method: "POST" }
-    );
-    const data = await response.json();
-
-    if (!data.success) {
-      return res.status(400).json({ error: "فشل التحقق من reCAPTCHA" });
-    }
+      if (!email || !password) return res.status(400).json({ error: 'البريد الإلكتروني وكلمة المرور مطلوبان' });
+      const { data: signIn, error: signInError } = await supabaseAnon.auth.signInWithPassword({ email, password });
+      if (signInError || !signIn?.user) return res.status(401).json({ error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' });
       
       const updatedAt = new Date().toISOString();  
 
@@ -289,7 +284,7 @@ router.post('/updatePwd', authMiddleware, async (req, res) => {
       const { data: updateData, error: updateError } = await supabaseAdmin
         .from('profiles')
         .update({ current_token: null, updated_at: updatedAt })
-        .eq('email', email)
+        .eq('id', signIn.user.id)
         .select()
         .single();
     
