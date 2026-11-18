@@ -16,6 +16,7 @@ import backupRouter from "./routes/backup.js";
 import filamentColorsRouter from "./routes/adminFilamentColors.js";
 import studioRouter from "./routes/studio.js";
 import humanRouter from "./routes/human.js";
+import creditsRouter from "./routes/credits.js";
 import { guardWrites } from "./middleware/human.js";
 
 dotenv.config(); // must be first!
@@ -67,6 +68,7 @@ app.use("/api/category", categoryRouter);
 app.use("/api/admin/backup", backupRouter);
 app.use("/api/admin/filament/colors", filamentColorsRouter);
 app.use("/api/studio", studioRouter);
+app.use("/api/credits", creditsRouter);
 
 // WhatsApp webhook endpoints
 app.use('/webhook/whatsapp', whatsappWebhook);

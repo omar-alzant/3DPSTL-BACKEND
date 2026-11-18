@@ -3,6 +3,7 @@ import express from 'express';
 import crypto from 'node:crypto';
 import { authMiddleware } from '../middleware/auth.js';
 import { supabaseAdmin } from '../supabase.js';
+import { notifyStudioOrder } from '../services/notify.js';
 
 const router = express.Router();
 
@@ -39,12 +40,14 @@ const DEFAULTS = () => ({
   swapSeconds: 70, // seconds per filament swap (AMS)
   startupMinutes: 5, // heating + calibration
   whatsapp: process.env.STUDIO_WHATSAPP || '96176118290',
-  tools: {}, // { [toolId]: { enabled, pricePerGram, minPrice, setupFee } }
+  creditsPerDownload: 0, // كريدت لكل تنزيل ملف (إذا لم تُحدَّد قيمة للأداة)
+  payment: { whish: { number: '', name: '' }, neo: { number: '', name: '' }, note: '' }, // بيانات الدفع لشحن الكريدت
+  tools: {}, // { [toolId]: { enabled, pricePerGram, minPrice, setupFee, credits } }
 });
 
 let cache = { at: 0, value: null };
 
-async function loadSettings() {
+export async function loadSettings() {
   if (cache.value && Date.now() - cache.at < 60e3) return cache.value;
   let saved = {};
   try {
@@ -54,7 +57,8 @@ async function loadSettings() {
   } catch (err) {
     console.error('studio settings load error:', err.message);
   }
-  const value = { ...DEFAULTS(), ...saved, tools: { ...(saved.tools || {}) } };
+  const def = DEFAULTS();
+  const value = { ...def, ...saved, payment: { ...def.payment, ...(saved.payment || {}) }, tools: { ...(saved.tools || {}) } };
   cache = { at: Date.now(), value };
   return value;
 }
@@ -92,9 +96,13 @@ function cleanSettings(b = {}) {
       pricePerGram: opt(t.pricePerGram, 100),
       minPrice: opt(t.minPrice),
       setupFee: money(t.setupFee ?? 0) ?? 0,
+      credits: t.credits === '' || t.credits === null || t.credits === undefined ? null : Math.max(0, Math.min(1e6, parseInt(t.credits, 10) || 0)),
     };
   }
-  return { value: { currency, pricePerGram, minPrice, colorFee, pricePerHour, printFlow, swapSeconds, startupMinutes, whatsapp, tools } };
+  const creditsPerDownload = Math.max(0, Math.min(1e6, parseInt(b.creditsPerDownload, 10) || 0));
+  const acct = (a = {}) => ({ number: String(a.number || '').trim().slice(0, 40), name: String(a.name || '').trim().slice(0, 60) });
+  const payment = { whish: acct(b.payment?.whish), neo: acct(b.payment?.neo), note: String(b.payment?.note || '').trim().slice(0, 500) };
+  return { value: { currency, pricePerGram, minPrice, colorFee, pricePerHour, printFlow, swapSeconds, startupMinutes, whatsapp, creditsPerDownload, payment, tools } };
 }
 
 // Public: what the Studio uses to show prices
@@ -159,7 +167,7 @@ router.post('/orders', authMiddleware, rateLimit, async (req, res) => {
     const id = `ST-${d.toISOString().slice(2, 10).replace(/-/g, '')}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
     const est = b.estimate && typeof b.estimate === 'object' ? b.estimate : null;
 
-    const { error } = await supabaseAdmin.from(TABLE).insert({
+    const row = {
       id,
       user_id: req.id,
       tool_id: toolId,
@@ -172,8 +180,12 @@ router.post('/orders', authMiddleware, rateLimit, async (req, res) => {
       notes: str(b.notes, 1000),
       estimate: est && { grams: num(est.grams), minutes: num(est.minutes), price: num(est.price), currency: str(est.currency, 8) },
       size: Array.isArray(b.size) ? b.size.slice(0, 3).map(Number) : null,
-    });
+    };
+    const { error } = await supabaseAdmin.from(TABLE).insert(row);
     if (error) throw error;
+
+    // إيميل للمحل (لا ينتظر الرد ولا يُفشل الطلب)
+    notifyStudioOrder({ ...row, email: req.email }).catch(() => {});
 
     res.status(201).json({ id });
   } catch (err) {
