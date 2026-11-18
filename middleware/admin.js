@@ -12,7 +12,7 @@ export async function requireAdmin(req, res, next) {
     // Fetch the profile of the logged-in user
     const { data: profile, error } = await supabaseAdmin
       .from('profiles')
-      .select('is_Admin')
+      .select('is_admin')
       .eq('id', userId)
       .single();
 
@@ -21,7 +21,7 @@ export async function requireAdmin(req, res, next) {
       return res.status(500).json({ error: 'Failed to verify admin status' });
     }
 
-    if (!profile?.is_Admin) {
+    if (!profile?.is_admin) {
       return res.status(403).json({ error: 'Admin access only' });
     }
 

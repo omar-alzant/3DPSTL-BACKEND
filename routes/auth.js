@@ -1,6 +1,6 @@
 
 import express from  'express';
-import {supabaseAnon,supabaseAdmin, getAuthenticatedSupabaseClient} from  '../supabase.js';
+import { supabaseAnon, supabaseAdmin } from '../supabase.js'; // anon: Supabase Auth only — all table access uses the service role
 import { authMiddleware } from '../middleware/auth.js';
 
 import jwt from  'jsonwebtoken';
@@ -18,7 +18,7 @@ router.put("/", authMiddleware, async (req, res) => {
   const userId = req.id;
   const { full_name, phone, avatar } = req.body;
 
-  const { data, error } = await supabaseAnon
+  const { data, error } = await supabaseAdmin
     .from("profiles")
     .update({ full_name, phone, avatar, updated_at: new Date() })
     .eq("id", userId)
@@ -71,7 +71,7 @@ router.put("/password", authMiddleware, async (req, res) => {
 router.get("/", authMiddleware, async (req, res) => {
   const userId = req.id;
 
-  const { data, error } = await supabaseAnon
+  const { data, error } = await supabaseAdmin
     .from("profiles")
     .select("*")
     .eq("id", userId)
@@ -152,7 +152,7 @@ router.post('/register', async (req, res) => {
       const createdAt = new Date().toISOString();
       
       // At this point, authUser.user is guaranteed to exist.
-      const { error: insertError } = await supabaseAnon
+      const { error: insertError } = await supabaseAdmin
       .from('profiles')
       .insert([{ id: authUser.user.id, full_name, email, avatar, created_at: createdAt, updated_at: createdAt }]);
       
@@ -230,7 +230,7 @@ router.post('/updatePwd', authMiddleware, async (req, res) => {
   
   try {
     // 1️⃣ Check if the email exists in profiles table
-    const { data: profileData, error: profileError } = await supabaseAnon
+    const { data: profileData, error: profileError } = await supabaseAdmin
       .from('profiles')
       .select('id') // just select minimal data
       .eq('email', email.trim())
@@ -286,7 +286,7 @@ router.post('/updatePwd', authMiddleware, async (req, res) => {
       const updatedAt = new Date().toISOString();  
 
       // 5️⃣ تحديث current_token في قاعدة البيانات
-      const { data: updateData, error: updateError } = await supabaseAnon
+      const { data: updateData, error: updateError } = await supabaseAdmin
         .from('profiles')
         .update({ current_token: null, updated_at: updatedAt })
         .eq('email', email)
@@ -321,10 +321,9 @@ router.post('/updatePwd', authMiddleware, async (req, res) => {
 
     
     if (loginError) return res.status(400).json({ error: loginError.message });
-    const authenticatedClient = getAuthenticatedSupabaseClient(loginData.session.access_token);
     // 2️⃣ جلب بيانات البروفايل (مع current_token للتحقق)
 
-    const { data: profile, error } = await authenticatedClient
+    const { data: profile, error } = await supabaseAdmin
       .from('profiles')
       .select('*')
       .eq('id', loginData.user.id)
@@ -360,7 +359,7 @@ router.post('/updatePwd', authMiddleware, async (req, res) => {
 // ... (After step 4: token creation)
 const updatedAt = new Date().toISOString();  
 
-  await supabaseAnon
+  await supabaseAdmin
     .from('profiles')
     .update({ current_token: token, updated_at: updatedAt })
     .eq('id', loginData.user.id);
@@ -401,7 +400,7 @@ const updatedAt = new Date().toISOString();  
 
       const [signOutResult, updateResult] = await Promise.all([
         supabaseAnon.auth.signOut(),
-        supabaseAnon.from('profiles').update({
+        supabaseAdmin.from('profiles').update({
           current_token: null,
           updated_at: new Date().toISOString()
         }).eq('id', userId)

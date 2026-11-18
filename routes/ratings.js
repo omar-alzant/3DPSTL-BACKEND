@@ -1,7 +1,7 @@
 // src/routes/ratings.js
 import express from 'express';
 import { authMiddleware } from '../middleware/auth.js';
-import { supabaseAnon, supabaseAdmin } from '../supabase.js';
+import { supabaseAdmin } from '../supabase.js';
 
 const router = express.Router();
 

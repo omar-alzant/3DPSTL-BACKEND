@@ -759,13 +759,14 @@ $$;
 
 
 -- 1. Give everyone access to the schema itself
-GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+-- Only the backend (service role) may access data. The anon key is public — see DB/lock_down_anon.sql
+GRANT USAGE ON SCHEMA public TO service_role;
 
 -- 2. Give access to all existing tables
-GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
 
 -- 3. Give access to all sequences (important for ID auto-incrementing)
-GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role;
 
 -- 4. Give access to all functions
-GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO service_role;

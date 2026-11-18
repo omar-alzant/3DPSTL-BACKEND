@@ -1,3 +1,4 @@
+import jwt from 'jsonwebtoken';
 // src/routes/admin.products.js
 import express from 'express';
 import { supabaseAdmin } from '../supabase.js';
@@ -7,17 +8,42 @@ import {isBase64Image, isHttpUrl, isSupabaseStorageUrl, processImage, uploadToSu
 
 const router = express.Router();
 
+// Hidden products (items.isdisabled = true) are only shown to admins.
+// GET routes stay public; an admin request (valid Bearer token + is_admin) also sees hidden items.
+async function isAdminRequest(req) {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token || !process.env.JWT_SECRET) return false;
+  try {
+    const { id } = jwt.verify(token, process.env.JWT_SECRET);
+    const { data } = await supabaseAdmin.from('profiles').select('is_admin').eq('id', id).maybeSingle();
+    return !!data?.is_admin;
+  } catch {
+    return false;
+  }
+}
+const visibleOnly = (list) => (Array.isArray(list) ? list.filter((i) => i?.isdisabled !== true) : list);
+
+
+// ترقيم آمن: الأرقام تصل من الرابط كنصوص، فنحوّلها ونحدّها (كان "10" يُجمع كنص فتعيد الصفحة 2 كل العناصر)
+function paging(query, defSize = 10) {
+  const page = Math.max(1, parseInt(query.page, 10) || 1);
+  const pageSize = Math.min(100, Math.max(1, parseInt(query.pageSize, 10) || defSize));
+  const from = (page - 1) * pageSize;
+  return { page, pageSize, from, to: from + pageSize - 1 };
+}
+// نص البحث لـ ilike: نهرّب % و _ ونحذف ما يكسر صيغة الفلاتر
+const likeTerm = (q) => String(q || '').trim().slice(0, 100).replace(/[\\%_]/g, (c) => '\\' + c).replace(/[,()*]/g, ' ');
+
 //  Brands Endpoints
 router.get('/market', async (req, res) => {
-  const page = parseInt(req.query.page) || 1;
-  const pageSize = parseInt(req.query.pageSize) || 10;
+  const { page, pageSize, from, to } = paging(req.query, 10);
+  const q = likeTerm(req.query.q);
 
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
-
-  const { data, error, count } = await supabaseAdmin
+  let query = supabaseAdmin
     .from('brands')
-    .select('*', { count: 'exact' })
+    .select('*', { count: 'exact' });
+  if (q) query = query.ilike('name', `%${q}%`);
+  const { data, error, count } = await query
     .order('updated_at', { ascending: false })
     .range(from, to);
 
@@ -576,6 +602,7 @@ router.get('/item/onsale', async (req, res) => {
       )
   `)
     .eq('variants.onsale', true)
+    .not('isdisabled', 'is', true)
     .order('updated_at', { ascending: false })
     .limit(5);
 
@@ -600,15 +627,15 @@ router.get("/item", async (req, res) => {
       minLen,
       maxLen,
       onsale,
-      page = 1,
-      pageSize = 8
+      include_hidden,
+      visibility // admin filter: 'hidden' | 'visible'
     } = req.query;
+    const showHidden = include_hidden === 'true' && (await isAdminRequest(req));
 
     // console.log({dd : req.query})
 
     
-    const from = (page - 1) * pageSize;
-    const to = from + pageSize - 1;
+    const { from, to } = paging(req.query, 8);
 
     let query = supabaseAdmin
       .from("items")
@@ -637,7 +664,10 @@ router.get("/item", async (req, res) => {
   );
 
     /* ---------- ITEM FILTERS ---------- */
-    if (q) query = query.ilike("name", `%${q}%`);
+    if (!showHidden || visibility === "visible") query = query.not("isdisabled", "is", true);
+    else if (visibility === "hidden") query = query.eq("isdisabled", true);
+    const term = likeTerm(q);
+    if (term) query = query.ilike("name", `%${term}%`);
 
     if (model_id)
       query = query.in("model_id", model_id.split(","));
@@ -712,11 +742,11 @@ router.get('/item/:id', async (req, res) => {
     return res.status(400).json({ error: errorRelatedItems.message });
   }
 
-  if (!item) { // Check if item is null, not an empty array
+  if (!item || (item.isdisabled === true && !(await isAdminRequest(req)))) {
     return res.status(404).json({ message: 'Item not found' });
   }
 
-  res.json({item, relatedItems});
+  res.json({ item, relatedItems: visibleOnly(relatedItems) });
 });
 
 router.post('/item', authMiddleware, requireAdmin, async (req, res) => {
@@ -840,6 +870,7 @@ router.post('/item', authMiddleware, requireAdmin, async (req, res) => {
       short_description: short_description ?? null,
       brands_ids: brands_ids,
       galleryurls: uploadedUrls,
+      isdisabled: req.body.isdisabled === true || req.body.isdisabled === 'true',
       };
 
     const { data: item, error: iErr } = await supabaseAdmin
@@ -1156,7 +1187,7 @@ if (skuIdsToDelete.length > 0) {
 router.get('/item/relateditem/:itemId', async (req, res) => {
   const { itemId } = req.params;
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
   .rpc("get_related_items_by_type", {
     p_item_id: itemId,
     p_limit: 10
@@ -1165,7 +1196,7 @@ router.get('/item/relateditem/:itemId', async (req, res) => {
   if (error) {
     return res.status(400).json({ error: error.message });
   }
-  res.json(data);
+  res.json(visibleOnly(data));
 })
 
 router.delete('/item/:id', authMiddleware, requireAdmin, async (req, res) => {

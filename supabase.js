@@ -12,10 +12,11 @@ const svc = process.env.SUPABASE_SERVICE_ROLE_KEY;
 // Base options for client creation
 const clientOptions = { auth: { persistSession: false } };
 
-// For verifying user tokens from the frontend (Bearer)
+// ANON key: Supabase Auth only (sign in / sign up / reset password / sign out).
+// Never use it for tables — the anon role has no table access (see DB/lock_down_anon.sql).
 export const supabaseAnon = createClient(url, anon, clientOptions);
 
-// For privileged DB writes (server-side only)
+// SERVICE ROLE key: every table, RPC and storage call (server-side only, never in the frontend).
 export const supabaseAdmin = createClient(url, svc, clientOptions);
 
 export const supabase = createClient(url, anon);

@@ -1,6 +1,6 @@
 import jwt from  'jsonwebtoken';
 
-import { supabaseAnon } from  '../supabase.js';
+import { supabaseAdmin } from '../supabase.js';
 
 
 
@@ -20,7 +20,7 @@ export async function authMiddleware(req, res, next) {
     const email = decoded.email;
     
     // Optional: Check if token matches the current_token in DB (Single Session Logic)
-    const { data: profile } = await supabaseAnon
+    const { data: profile } = await supabaseAdmin
       .from('profiles')
       .select('current_token')
       .eq('id', userId)

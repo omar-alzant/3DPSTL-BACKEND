@@ -14,6 +14,9 @@ import dotenv from 'dotenv';
 import sitemapRouter from './routes/sitemap.js';
 import backupRouter from "./routes/backup.js";
 import filamentColorsRouter from "./routes/adminFilamentColors.js";
+import studioRouter from "./routes/studio.js";
+import humanRouter from "./routes/human.js";
+import { guardWrites } from "./middleware/human.js";
 
 dotenv.config(); // must be first!
 
@@ -32,8 +35,8 @@ app.use(cors({
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-Filename"],
-  exposedHeaders: ["Content-Disposition"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-Filename", "X-Human-Pass"],
+  exposedHeaders: ["Content-Disposition", "X-Human-Required"],
 }));
 
 
@@ -50,6 +53,10 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 app.get('/health', (_, res) => res.json({ ok: true }));
+
+// التحقق البشري: نقطة التحقق + حماية كل طلبات الكتابة على /api (القراءة مفتوحة لمحركات البحث)
+app.use('/api/human', humanRouter);
+app.use('/api', guardWrites);
 app.use('/api/products', products);
 app.use('/api/admin/products', adminProducts);
 app.use('/api/ratings', ratings);
@@ -59,6 +66,7 @@ app.use('/api/home', HomeRoutes);
 app.use("/api/category", categoryRouter);
 app.use("/api/admin/backup", backupRouter);
 app.use("/api/admin/filament/colors", filamentColorsRouter);
+app.use("/api/studio", studioRouter);
 
 // WhatsApp webhook endpoints
 app.use('/webhook/whatsapp', whatsappWebhook);

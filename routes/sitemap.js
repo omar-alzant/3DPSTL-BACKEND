@@ -40,7 +40,8 @@ router.get('/', async (req, res) => {
     // // 3. Fetch Products (CRITICAL for the "Professional" search look)
     const { data: items } = await supabaseAdmin
       .from('items') // Ensure this is your product table name
-      .select('id, updated_at');
+      .select('id, updated_at')
+      .not('isdisabled', 'is', true);
 
     if (items) {
       items.forEach((item) => {
