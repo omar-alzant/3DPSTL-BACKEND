@@ -24,12 +24,16 @@ CREATE TABLE IF NOT EXISTS profiles (
   id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   full_name TEXT,
   email TEXT,
+  phone TEXT,
   avatar TEXT,
   is_admin BOOLEAN DEFAULT FALSE,
   current_token TEXT,
   created_at TIMESTAMP DEFAULT now(),
   updated_at TIMESTAMP DEFAULT now()
 );
+
+-- لقواعد بيانات قديمة أُنشئت بدون عمود الهاتف
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS phone TEXT;
 
 CREATE TABLE IF NOT EXISTS categories (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

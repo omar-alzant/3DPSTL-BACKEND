@@ -153,8 +153,11 @@ router.post('/spend', authMiddleware, limit(60, 10 * 60e3), async (req, res) => 
   try {
     const b = req.body || {};
     const toolId = str(b.toolId, 60);
-    const hash = str(b.hash, 128);
-    if (!toolId || !/^[a-f0-9]{16,128}$/.test(hash)) return res.status(400).json({ error: 'طلب غير صالح' });
+    if (!toolId || !b.params || typeof b.params !== 'object' || Array.isArray(b.params))
+      return res.status(400).json({ error: 'طلب غير صالح' });
+    // البصمة يحسبها الخادم من التصميم نفسه — لا نثق بالبصمة القادمة من المتصفح
+    // (نفس طريقة المتصفح: SHA-256 لـ JSON.stringify([toolId, params]) — فالملفات المدفوعة سابقاً تبقى مجانية)
+    const hash = crypto.createHash('sha256').update(JSON.stringify([toolId, b.params])).digest('hex');
 
     if (await isAdmin(req.id)) return res.json({ ok: true, charged: 0, admin: true });
 
@@ -199,7 +202,7 @@ router.post('/spend', authMiddleware, limit(60, 10 * 60e3), async (req, res) => 
     }, { onConflict: 'user_id,design_hash' });
     if (se) console.error('save download error:', se.message);
 
-    res.json({ ok: true, charged: cost, balance });
+    res.json({ ok: true, charged: cost, balance, hash });
   } catch (err) {
     console.error('credit spend error:', err.message);
     res.status(500).json({ error: 'تعذّر خصم الكريدت، حاول مجدداً' });

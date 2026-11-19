@@ -19,13 +19,24 @@ const SESSION_TTL = process.env.SESSION_TTL || '30d';
 
 router.put("/", authMiddleware, async (req, res) => {
   const userId = req.id;
-  const { full_name, phone, avatar } = req.body;
+  const { full_name, phone, avatar } = req.body || {};
+  const clean = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : undefined);
+
+  // فقط الحقول المرسلة تتغيّر
+  const patch = { updated_at: new Date() };
+  if (full_name !== undefined) patch.full_name = clean(full_name, 80);
+  if (phone !== undefined) {
+    const p = clean(phone, 20) || "";
+    if (p && !/^\+?[0-9 ()-]{6,20}$/.test(p)) return res.status(400).json({ error: "رقم الهاتف غير صالح" });
+    patch.phone = p || null;
+  }
+  if (avatar !== undefined) patch.avatar = clean(avatar, 500);
 
   const { data, error } = await supabaseAdmin
     .from("profiles")
-    .update({ full_name, phone, avatar, updated_at: new Date() })
+    .update(patch)
     .eq("id", userId)
-    .select()
+    .select("id, full_name, email, phone, avatar, is_admin, created_at, updated_at")
     .single();
 
   if (error) return res.status(400).json({ error: error.message });

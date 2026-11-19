@@ -1,63 +1,80 @@
+// GET /sitemap (served as https://www.3dpstl.com/sitemap.xml through netlify.toml)
+// All public pages: home, shop + categories, products, Studio + every enabled tool, info pages.
+// Built as plain XML (no gzip: Netlify/Google compress on their own) and cached for an hour.
 import express from 'express';
-import { SitemapStream } from 'sitemap'; // Added missing import
-import zlib from 'zlib'; // Added missing import
 import { supabaseAdmin } from '../supabase.js';
+import { loadSettings } from './studio.js';
 
 const router = express.Router();
+const SITE = () => (process.env.SITE_URL || 'https://www.3dpstl.com').replace(/\/$/, '');
 
-// Changed from '/sitemap.xml' to '/' because it's already prefixed in index.js
+// Studio tools (ids from the frontend: src/Sources/studio/tools/index.js) — add new tools here too
+const STUDIO_TOOLS = [
+  'keychain', 'pencilTopper', 'initialSign', 'dualName', 'lbPlate', 'plate',
+  'keycaps', 'toteBag', 'flexiToy', 'birthSign', 'phoneCase',
+];
+
+const xmlEsc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]));
+const day = (d) => {
+  const t = d ? new Date(d) : null;
+  return t && !Number.isNaN(t.getTime()) ? t.toISOString().slice(0, 10) : null;
+};
+
+let cache = { at: 0, xml: '' };
+
+async function build() {
+  const urls = [];
+  const add = (path, changefreq, priority, lastmod) => urls.push({ loc: SITE() + path, changefreq, priority, lastmod: day(lastmod) });
+
+  // pages
+  add('/', 'daily', 1.0);
+  add('/our-works', 'daily', 0.9);
+  add('/studio', 'weekly', 0.9);
+  add('/filamentColors', 'monthly', 0.5);
+  add('/aboutUs', 'monthly', 0.5);
+  add('/terms', 'yearly', 0.2);
+  add('/privacy', 'yearly', 0.2);
+
+  // Studio tools (only the ones enabled in the admin)
+  try {
+    const settings = await loadSettings();
+    for (const id of STUDIO_TOOLS) {
+      if (settings?.tools?.[id]?.enabled === false) continue;
+      add(`/studio/${id}`, 'weekly', 0.8);
+    }
+  } catch (err) {
+    console.error('sitemap studio:', err.message);
+  }
+
+  // shop categories
+  const { data: types, error: te } = await supabaseAdmin.from('types').select('id, updated_at');
+  if (te) console.error('sitemap types:', te.message);
+  for (const t of types || []) add(`/our-works?type_id=${t.id}`, 'weekly', 0.7, t.updated_at);
+
+  // products
+  const { data: items, error: ie } = await supabaseAdmin
+    .from('items').select('id, updated_at').not('isdisabled', 'is', true);
+  if (ie) console.error('sitemap items:', ie.message);
+  for (const it of items || []) add(`/item/${it.id}`, 'weekly', 0.8, it.updated_at);
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls
+  .map((u) => `  <url><loc>${xmlEsc(u.loc)}</loc>${u.lastmod ? `<lastmod>${u.lastmod}</lastmod>` : ''}<changefreq>${u.changefreq}</changefreq><priority>${u.priority.toFixed(1)}</priority></url>`)
+  .join('\n')}
+</urlset>
+`;
+}
+
 router.get('/', async (req, res) => {
   try {
-    res.header('Content-Type', 'application/xml');
-    res.header('Content-Encoding', 'gzip');
-
-
-    const smStream = new SitemapStream({ hostname: 'https://3dpstl.com' });
-    // 
-    // const smStream = new SitemapStream({ hostname: 'http://localhost:3000' });
-    const pipeline = smStream.pipe(zlib.createGzip());
-
-    // 1. Static Pages
-    smStream.write({ url: '/', changefreq: 'daily', priority: 1.0 });
-    smStream.write({ url: '/shop', changefreq: 'daily', priority: 0.9 });
-
-    // 2. Fetch Categories
-    const { data: types } = await supabaseAdmin
-      .from('types')
-      .select('id, updated_at');
-
-    if (types) {
-      types.forEach((cat) => {
-        smStream.write({
-          url: `/shop?type_id=${cat.id}`, // Fixed path to match your logic
-          lastmod: cat.updated_at,
-          changefreq: 'weekly',
-          priority: 0.8,
-        });
-      });
-    }
-
-    // // 3. Fetch Products (CRITICAL for the "Professional" search look)
-    const { data: items } = await supabaseAdmin
-      .from('items') // Ensure this is your product table name
-      .select('id, updated_at')
-      .not('isdisabled', 'is', true);
-
-    if (items) {
-      items.forEach((item) => {
-        smStream.write({
-          url: `/item/${item.id}`, // Matches your React Route path="/item/:id"
-          lastmod: item.updated_at,
-          changefreq: 'weekly',
-          priority: 0.7,
-        });
-      });
-    }
-
-    smStream.end();
-    pipeline.pipe(res).on('error', (e) => { throw e });
+    if (!cache.xml || Date.now() - cache.at > 60 * 60e3) cache = { at: Date.now(), xml: await build() };
+    res.set('Content-Type', 'application/xml; charset=utf-8');
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.send(cache.xml);
   } catch (e) {
-    console.error("Sitemap error:", e);
+    console.error('Sitemap error:', e);
+    if (cache.xml) return res.type('application/xml').send(cache.xml); // last good copy
     res.status(500).end();
   }
 });
