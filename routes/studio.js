@@ -3,7 +3,7 @@ import express from 'express';
 import crypto from 'node:crypto';
 import { authMiddleware } from '../middleware/auth.js';
 import { supabaseAdmin } from '../supabase.js';
-import { notifyStudioOrder } from '../services/notify.js';
+import { notifyStudioOrder, confirmStudioOrder } from '../services/notify.js';
 
 const router = express.Router();
 
@@ -186,6 +186,7 @@ router.post('/orders', authMiddleware, rateLimit, async (req, res) => {
 
     // إيميل للمحل (لا ينتظر الرد ولا يُفشل الطلب)
     notifyStudioOrder({ ...row, email: req.email }).catch(() => {});
+    confirmStudioOrder({ ...row, email: req.email }).catch(() => {});
 
     res.status(201).json({ id });
   } catch (err) {

@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { authMiddleware } from '../middleware/auth.js';
 import { supabaseAdmin } from '../supabase.js';
 import { loadSettings } from './studio.js';
-import { notifyCreditRequest } from '../services/notify.js';
+import { notifyCreditRequest, confirmCreditRequest, notifyCreditDecision } from '../services/notify.js';
 
 const router = express.Router();
 const METHODS = ['whish', 'neo'];
@@ -129,6 +129,7 @@ router.post('/requests', authMiddleware, limit(5, 10 * 60e3), async (req, res) =
     supabaseAdmin.from('profiles').select('full_name').eq('id', req.id).maybeSingle()
       .then(({ data }) => notifyCreditRequest({ ...row, email: req.email, full_name: data?.full_name }))
       .catch(() => {});
+    confirmCreditRequest({ ...row, email: req.email }).catch(() => {});
     res.status(201).json({ id });
   } catch (err) {
     console.error('credit request error:', err.message);
@@ -254,6 +255,38 @@ router.get('/admin/requests', authMiddleware, requireAdmin, async (req, res) => 
   }
 });
 
+// إيميل للزبون بنتيجة طلب الشحن — لا يوقف الرد أبداً
+async function emailDecision(id, approved, balance) {
+  try {
+    const { data: r } = await supabaseAdmin.from('credit_requests').select('*').eq('id', id).maybeSingle();
+    if (!r) return;
+    const { data: p } = await supabaseAdmin.from('profiles').select('email').eq('id', r.user_id).maybeSingle();
+    let email = p?.email;
+    if (!email) {
+      const { data: u } = await supabaseAdmin.auth.admin.getUserById(r.user_id);
+      email = u?.user?.email;
+    }
+    await notifyCreditDecision({ ...r, email }, approved, balance);
+  } catch (err) {
+    console.error('credit decision email:', err.message);
+  }
+}
+
+// GET /api/credits/admin/summary — counts for the admin badges
+router.get('/admin/summary', authMiddleware, requireAdmin, async (req, res) => {
+  const count = (table, status) =>
+    supabaseAdmin.from(table).select('id', { count: 'exact', head: true }).eq('status', status)
+      .then(({ count, error }) => (error ? 0 : count || 0));
+  try {
+    const [orders, studio, credits] = await Promise.all([
+      count('orders', 'pending'), count('studio_orders', 'new'), count('credit_requests', 'pending'),
+    ]);
+    res.json({ orders, studio, credits, total: orders + studio + credits });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/admin/requests/:id/approve', authMiddleware, requireAdmin, async (req, res) => {
   try {
     const { data, error } = await supabaseAdmin.rpc('credit_approve', {
@@ -265,6 +298,7 @@ router.post('/admin/requests/:id/approve', authMiddleware, requireAdmin, async (
       throw error;
     }
     res.json({ ok: true, balance: data });
+    emailDecision(req.params.id, true, data);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -279,6 +313,7 @@ router.post('/admin/requests/:id/reject', authMiddleware, requireAdmin, async (r
     if (error) throw error;
     if (!data) return res.status(409).json({ error: 'Request already handled' });
     res.json({ ok: true });
+    emailDecision(req.params.id, false);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

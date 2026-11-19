@@ -3,6 +3,7 @@ import express from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import { supabaseAdmin } from '../supabase.js';
 import { sendOrderConfirmation } from '../services/whatsapp.js';
+import { notifyShopOrder, confirmShopOrder } from '../services/notify.js';
 
 const router = express.Router();
 
@@ -210,6 +211,10 @@ router.post('/', authMiddleware, async (req, res) => {
     if (stockResults.some(r => r.error)) {
       console.error("Stock sync error occurred.");
     }
+
+    // إيميل للمحل + تأكيد للزبون (لا يوقف الطلب إذا فشل)
+    notifyShopOrder(order, orderItemRows, req.email).catch(() => {});
+    confirmShopOrder(order, orderItemRows, req.email).catch(() => {});
 
     res.status(201).json({
       // orderId: order.id,
