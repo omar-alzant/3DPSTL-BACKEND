@@ -13,6 +13,9 @@ const port = "https://www.3dpstl.com"
 
 const router = express.Router();
 
+// مدة بقاء الزبون مسجّل الدخول (يمكن تغييرها من متغيّر SESSION_TTL في Railway، مثل 7d أو 30d)
+const SESSION_TTL = process.env.SESSION_TTL || '30d';
+
 
 router.put("/", authMiddleware, async (req, res) => {
   const userId = req.id;
@@ -28,44 +31,6 @@ router.put("/", authMiddleware, async (req, res) => {
   if (error) return res.status(400).json({ error: error.message });
 
   res.json(data);
-});
-
-router.put("/password", authMiddleware, async (req, res) => {
-  const { currentEmail, newPassword } = req.body;
-
-  if (currentEmail !== req.email) {
-    return res.status(400).json({ error: "Not matched email!" });
-  }
-
-
-  // Update password
-  const { error } = await supabaseAdmin.auth.admin.updateUserById(
-    req.id,
-    { password: newPassword }
-  );
-
-  if (error) return res.status(400).json({ error: error.message });
-
-  const token = jwt.sign(
-    {
-      id: userId,
-      email: data.user.email,
-      isAdmin: profile.is_admin
-    },
-    process.env.JWT_SECRET,
-    { expiresIn: '24h' }
-  );
-
-  await supabaseAdmin
-    .from('profiles')
-    .update({
-      current_token: token,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', userId);
-
-
-  res.json({ success: true });
 });
 
 router.get("/", authMiddleware, async (req, res) => {
@@ -101,27 +66,90 @@ router.post('/confirm-login', async (req, res) => {
     // Fetch profile / role
     const { data: profile } = await supabaseAdmin
       .from('profiles')
-      .select('is_admin')
+      .select('*')
       .eq('id', userId)
       .single();
 
     const isAdmin = !!profile?.is_admin;
 
-    // Issue YOUR JWT
+    // Issue YOUR JWT — same shape as /login, so authMiddleware accepts it
     const appToken = jwt.sign(
-      { userId, email, isAdmin },
+      { id: userId, email, isAdmin },
       process.env.JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: SESSION_TTL }
     );
+    await supabaseAdmin
+      .from('profiles')
+      .update({ current_token: appToken, updated_at: new Date().toISOString() })
+      .eq('id', userId);
 
+    const { current_token, ...safeProfile } = profile || {};
     res.json({
       token: appToken,
       email,
       isAdmin,
+      profile: profile ? safeProfile : null,
     });
 
   } catch (err) {
     res.status(500).json({ error: 'Confirmation failed' });
+  }
+});
+
+
+// ✅ تسجيل الدخول بحساب Google (عبر Supabase OAuth)
+// الواجهة ترسل access_token الخاص بجلسة Supabase بعد الرجوع من Google، فنتحقق منه وننشئ البروفايل
+// إذا كان أول دخول، ثم نصدر توكن التطبيق المعتاد. لا توجد كلمة سر لحسابات Google، لذلك تسجيل
+// الدخول بـ Google ينهي الجلسة القديمة على الجهاز الآخر بدل رفضه.
+router.post('/google', async (req, res) => {
+  try {
+    const sbToken = req.headers.authorization?.replace('Bearer ', '');
+    if (!sbToken) return res.status(401).json({ error: 'Missing token' });
+
+    const { data, error } = await supabaseAnon.auth.getUser(sbToken);
+    if (error || !data?.user) return res.status(401).json({ error: 'Invalid Google session' });
+    const user = data.user;
+    const provider = user.app_metadata?.provider;
+    const providers = user.app_metadata?.providers || [];
+    if (provider !== 'google' && !providers.includes('google')) {
+      return res.status(400).json({ error: 'Not a Google sign-in' });
+    }
+    if (!user.email) return res.status(400).json({ error: 'Google account has no email' });
+
+    let { data: profile } = await supabaseAdmin.from('profiles').select('*').eq('id', user.id).maybeSingle();
+    if (!profile) {
+      const now = new Date().toISOString();
+      const meta = user.user_metadata || {};
+      const { data: created, error: insErr } = await supabaseAdmin
+        .from('profiles')
+        .insert([{
+          id: user.id,
+          email: user.email,
+          full_name: meta.full_name || meta.name || user.email.split('@')[0],
+          avatar: meta.avatar_url || meta.picture || '',
+          created_at: now,
+          updated_at: now,
+        }])
+        .select('*')
+        .single();
+      if (insErr) return res.status(400).json({ error: insErr.message });
+      profile = created;
+    }
+
+    const token = jwt.sign(
+      { id: user.id, email: user.email, isAdmin: !!profile.is_admin },
+      process.env.JWT_SECRET,
+      { expiresIn: SESSION_TTL }
+    );
+    await supabaseAdmin
+      .from('profiles')
+      .update({ current_token: token, updated_at: new Date().toISOString() })
+      .eq('id', user.id);
+
+    const { current_token, ...safeProfile } = profile;
+    res.json({ message: 'Login successful', token, email: user.email, isAdmin: !!profile.is_admin, profile: safeProfile });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -170,9 +198,13 @@ router.post('/register', async (req, res) => {
 });
 
 router.post('/updatePwd', authMiddleware, async (req, res) => {
-  const { newPassword } = req.body;
+  const { newPassword, currentEmail } = req.body;
   const userId = req.id; // from verified JWT
 
+  // the page asks the user to type their email as a confirmation
+  if (currentEmail !== undefined && String(currentEmail).trim().toLowerCase() !== String(req.email || '').toLowerCase()) {
+    return res.status(400).json({ error: "The email doesn't match your account." });
+  }
   if (!newPassword || newPassword.length < 6) {
     return res.status(400).json({ error: "Password must be at least 6 characters." });
   }
@@ -206,7 +238,7 @@ router.post('/updatePwd', authMiddleware, async (req, res) => {
         isAdmin: profile.is_admin
       },
       process.env.JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: SESSION_TTL }
     );
 
     await supabaseAdmin
@@ -347,7 +379,7 @@ router.post('/updatePwd', authMiddleware, async (req, res) => {
         isAdmin: profile.is_admin 
       }, 
       process.env.JWT_SECRET, 
-      { expiresIn: '24h' }
+      { expiresIn: SESSION_TTL }
     );
 
 
