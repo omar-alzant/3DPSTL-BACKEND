@@ -281,10 +281,12 @@ router.get('/admin/summary', authMiddleware, requireAdmin, async (req, res) => {
     supabaseAdmin.from(table).select('id', { count: 'exact', head: true }).eq('status', status)
       .then(({ count, error }) => (error ? 0 : count || 0));
   try {
-    const [orders, studio, credits] = await Promise.all([
+    const [orders, studio, credits, errors] = await Promise.all([
       count('orders', 'pending'), count('studio_orders', 'new'), count('credit_requests', 'pending'),
+      supabaseAdmin.from('app_errors').select('id', { count: 'exact', head: true }).eq('resolved', false)
+        .then(({ count, error }) => (error ? 0 : count || 0)),
     ]);
-    res.json({ orders, studio, credits, total: orders + studio + credits });
+    res.json({ orders, studio, credits, errors, total: orders + studio + credits });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

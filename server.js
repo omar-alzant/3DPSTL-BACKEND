@@ -18,6 +18,9 @@ import studioRouter from "./routes/studio.js";
 import humanRouter from "./routes/human.js";
 import creditsRouter from "./routes/credits.js";
 import { guardWrites } from "./middleware/human.js";
+import { logRouter, systemRouter } from "./routes/system.js";
+import { logError } from "./services/errorLog.js";
+import { startBackupSchedule } from "./services/backup.js";
 
 dotenv.config(); // must be first!
 
@@ -57,6 +60,7 @@ app.get('/health', (_, res) => res.json({ ok: true }));
 
 // التحقق البشري: نقطة التحقق + حماية كل طلبات الكتابة على /api (القراءة مفتوحة لمحركات البحث)
 app.use('/api/human', humanRouter);
+app.use('/api/log', logRouter); // crash reports from browsers — before guardWrites so they always get through
 app.use('/api', guardWrites);
 app.use('/api/products', products);
 app.use('/api/admin/products', adminProducts);
@@ -69,6 +73,7 @@ app.use("/api/admin/backup", backupRouter);
 app.use("/api/admin/filament/colors", filamentColorsRouter);
 app.use("/api/studio", studioRouter);
 app.use("/api/credits", creditsRouter);
+app.use("/api/system", systemRouter);
 
 // WhatsApp webhook endpoints
 app.use('/webhook/whatsapp', whatsappWebhook);
@@ -76,5 +81,29 @@ app.use('/webhook/whatsapp', whatsappWebhook);
 // 404
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 
+// any error thrown in a route: log it + email, and answer 500 instead of crashing
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  console.error('route error:', err);
+  if (!/CORS not allowed/.test(err?.message || '')) {
+    logError({ source: 'server', message: `${req.method} ${req.path}: ${err?.message || err}`, stack: err?.stack, url: req.originalUrl, userAgent: req.headers['user-agent'], userId: req.id });
+  }
+  if (!res.headersSent) res.status(err?.status || 500).json({ error: 'Internal Server Error' });
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('unhandledRejection:', reason);
+  logError({ source: 'server', message: `unhandledRejection: ${reason?.message || reason}`, stack: reason?.stack });
+});
+process.on('uncaughtException', (err) => {
+  console.error('uncaughtException:', err);
+  // save it, then exit so Railway restarts a clean server
+  logError({ source: 'server', message: `uncaughtException: ${err?.message || err}`, stack: err?.stack })
+    .finally(() => setTimeout(() => process.exit(1), 500));
+});
+
 const port = process.env.PORT || 8080;
-app.listen(port, () => console.log(`API listening on :${port}`));
+app.listen(port, () => {
+  console.log(`API listening on :${port}`);
+  startBackupSchedule();
+});

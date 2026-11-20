@@ -97,6 +97,7 @@ export function notifyStudioOrder(o) {
       ['الاسم', esc(o.customer_name)],
       ['الهاتف', `<a href="tel:${esc(o.customer_phone)}">${esc(o.customer_phone)}</a> · <a href="https://wa.me/${esc(String(o.customer_phone).replace(/\D/g, ''))}">WhatsApp</a>`],
       ['العنوان', esc(o.customer_address)],
+      ['الموقع', o.customer_location ? `<a href="${esc(o.customer_location)}">📍 افتح على الخريطة</a>` : ''],
       ['الكمية', esc(o.qty)],
       ['الوزن التقريبي', est.grams ? `${esc(est.grams)} غ` : ''],
       ['الوقت التقريبي', est.minutes ? `${esc(est.minutes)} د` : ''],
@@ -112,7 +113,7 @@ export function notifyStudioOrder(o) {
   return send({
     subject: `🖨️ طلب Studio جديد ${o.id} — ${o.customer_name} (${o.tool_name || o.tool_id})`,
     html,
-    text: `طلب طباعة جديد ${o.id}\n${o.tool_name || o.tool_id}\n${o.customer_name} — ${o.customer_phone}\n${o.customer_address}\nالكمية: ${o.qty}\n${SITE()}/admin/studio`,
+    text: `طلب طباعة جديد ${o.id}\n${o.tool_name || o.tool_id}\n${o.customer_name} — ${o.customer_phone}\n${o.customer_address || ''}\n${o.customer_location || ''}\nالكمية: ${o.qty}\n${SITE()}/admin/studio`,
     replyTo: o.email || undefined,
   });
 }
@@ -260,4 +261,41 @@ export function notifyCreditDecision(r, approved, balance) {
         <p>إذا دفعت فعلاً، ردّ على هذا الإيميل مع صورة عن الإيصال ومنصلّحها.</p>`,
         `طلب الشحن ${r.id} لم يُقبل. ردّ على هذا الإيميل مع الإيصال إذا دفعت. 3DSTL`,
       );
+}
+
+// ─────────────────────────── monitoring ───────────────────────────
+
+/** خطأ بالموقع (من متصفح زبون أو من السيرفر) */
+export function notifyError(e) {
+  const where = e.source === 'client' ? 'عند زبون (المتصفح)' : 'بالسيرفر';
+  const html = `<div dir="rtl" style="font-family:Arial,sans-serif">
+    <h2 style="margin:0 0 8px">⚠️ صار خطأ ${where}</h2>
+    ${table([
+      ['الخطأ', `<span dir="ltr">${esc(e.message)}</span>`],
+      ['الصفحة', e.url ? `<span dir="ltr">${esc(e.url)}</span>` : ''],
+      ['الجهاز', e.userAgent ? `<span dir="ltr" style="font-weight:normal;font-size:12px">${esc(e.userAgent)}</span>` : ''],
+    ])}
+    ${e.stack ? `<pre dir="ltr" style="font-size:11px;background:#f5f5f5;padding:8px;white-space:pre-wrap">${esc(String(e.stack).split('\n').slice(0, 8).join('\n'))}</pre>` : ''}
+    <p style="color:#666;font-size:13px">إذا تكرّر نفس الخطأ ما بيوصلك إيميل تاني إلا بعد 6 ساعات. كل التفاصيل بلوحة الإدارة.</p>
+    ${button(`${SITE()}/admin/system`, 'افتح الأخطاء')}
+  </div>`;
+  return send({
+    subject: `⚠️ خطأ بالموقع ${e.source === 'client' ? '(متصفح)' : '(سيرفر)'}: ${String(e.message).slice(0, 80)}`,
+    html,
+    text: `خطأ ${where}\n${e.message}\n${e.url || ''}\n${SITE()}/admin/system`,
+  });
+}
+
+/** فشل الـ backup اليومي */
+export function notifyBackupFailed(reason) {
+  return send({
+    subject: '❌ فشل الـ backup اليومي لقاعدة البيانات — 3DSTL',
+    html: `<div dir="rtl" style="font-family:Arial,sans-serif">
+      <h2 style="margin:0 0 8px">فشل الـ backup اليومي</h2>
+      <p>السبب: <span dir="ltr">${esc(reason)}</span></p>
+      <p>جرّب "Backup now" من لوحة الإدارة، أو نزّل نسخة يدوية بزر Backup.</p>
+      ${button(`${SITE()}/admin/system`, 'افتح لوحة الإدارة')}
+    </div>`,
+    text: `فشل الـ backup اليومي: ${reason}`,
+  });
 }

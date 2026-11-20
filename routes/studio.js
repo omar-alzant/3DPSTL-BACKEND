@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { authMiddleware } from '../middleware/auth.js';
 import { supabaseAdmin } from '../supabase.js';
 import { notifyStudioOrder, confirmStudioOrder } from '../services/notify.js';
+import { normalizeMapLink } from '../util/mapLink.js';
 
 const router = express.Router();
 
@@ -155,7 +156,12 @@ router.post('/orders', authMiddleware, rateLimit, async (req, res) => {
     if (!name || !/^[+\d\s()-]{6,30}$/.test(phone))
       return res.status(400).json({ error: 'الاسم ورقم الهاتف مطلوبان' });
     const address = str(b.customer?.address, 300);
-    if (address.length < 5) return res.status(400).json({ error: 'عنوان السكن مطلوب' });
+    const rawLocation = str(b.customer?.location, 600);
+    const location = normalizeMapLink(rawLocation);
+    if (rawLocation && !location)
+      return res.status(400).json({ error: 'رابط الموقع غير صالح — الصق رابطاً من Google Maps أو Apple Maps' });
+    if (address.length < 5 && !location)
+      return res.status(400).json({ error: 'اكتب عنوان السكن أو أضف موقعك على الخريطة' });
 
     const toolId = str(b.toolId, 60);
     if (!toolId || !b.params || typeof b.params !== 'object' || Array.isArray(b.params))
@@ -175,7 +181,8 @@ router.post('/orders', authMiddleware, rateLimit, async (req, res) => {
       params: b.params,
       customer_name: name,
       customer_phone: phone,
-      customer_address: address,
+      customer_address: address || null,
+      customer_location: location || null,
       qty: Math.min(500, Math.max(1, parseInt(b.qty, 10) || 1)),
       notes: str(b.notes, 1000),
       estimate: est && { grams: num(est.grams), minutes: num(est.minutes), price: num(est.price), currency: str(est.currency, 8) },

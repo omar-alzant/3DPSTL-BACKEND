@@ -1,6 +1,8 @@
 // src/routes/catalogs.js
 import express from "express";
 import { supabaseAdmin } from "../supabase.js";
+import { authMiddleware } from '../middleware/auth.js';
+import { requireAdmin } from '../middleware/admin.js';
 import {isBase64Image, isHttpUrl, isSupabaseStorageUrl, processImage, uploadToSupabase} from '../helper/Helper.js'
 
 const router = express.Router();
@@ -23,7 +25,7 @@ router.get("/menu", async (req, res) => {
     }
   });
 
-  router.post("/", async (req, res) => {
+  router.post("/", authMiddleware, requireAdmin, async (req, res) => {
     try {
       const { name, galleryurls, sort_order, isdisabled, description } = req.body;
       let uploadedBannerUrls = []
@@ -107,7 +109,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", authMiddleware, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     let updates = { ...req.body, updated_at: new Date().toISOString() };
@@ -144,7 +146,7 @@ router.put("/:id", async (req, res) => {
 
 
 /** DELETE catalog */
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", authMiddleware, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 

@@ -2,6 +2,7 @@
 import express from 'express';
 import { supabaseAdmin } from '../supabase.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { requireAdmin } from '../middleware/admin.js';
 
 const router = express.Router();
 
@@ -48,7 +49,7 @@ router.get("/", async (req, res) => {
   
   });
 
-  router.post("/", authMiddleware, async (req, res) => {
+  router.post("/", authMiddleware, requireAdmin, async (req, res) => {
 
     const {
       name,
@@ -75,7 +76,7 @@ router.get("/", async (req, res) => {
     res.json(data);
   });
 
-  router.put("/:id", authMiddleware, async (req, res) => {
+  router.put("/:id", authMiddleware, requireAdmin, async (req, res) => {
 
     const { id } = req.params;
   
@@ -91,7 +92,7 @@ router.get("/", async (req, res) => {
     res.json(data);
   });
 
-  router.delete("/:id", authMiddleware, async (req, res) => {
+  router.delete("/:id", authMiddleware, requireAdmin, async (req, res) => {
 
     const { id } = req.params;
   

@@ -4,6 +4,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { supabaseAdmin } from '../supabase.js';
 import { sendOrderConfirmation } from '../services/whatsapp.js';
 import { notifyShopOrder, confirmShopOrder } from '../services/notify.js';
+import { requireAdmin } from '../middleware/admin.js';
 
 const router = express.Router();
 
@@ -92,7 +93,7 @@ router.patch('/admin/remove-item/:orderId', authMiddleware, async (req, res) => 
   }
 });
 
-router.patch('/admin/status/:id', authMiddleware, async (req, res) => {
+router.patch('/admin/status/:id', authMiddleware, requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { status, note } = req.body;
 
