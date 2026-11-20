@@ -12,6 +12,7 @@ const SITE = () => (process.env.SITE_URL || 'https://www.3dpstl.com').replace(/\
 const STUDIO_TOOLS = [
   'name-keychain', 'pencil-topper', 'initial-sign', 'dual-name', 'lebanese-plate', 'plate-keychain',
   'keycaps', 'tpu-tote', 'flexi-toy', 'birth-sign', 'phone-case',
+  'qr-code', 'coaster', 'cookie-cutter', 'stamp', 'ramadan-tray', 'desk-organizer', 'lebanon-keychain',
 ];
 
 const xmlEsc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]));
@@ -30,6 +31,7 @@ async function build() {
   add('/', 'daily', 1.0);
   add('/our-works', 'daily', 0.9);
   add('/studio', 'weekly', 0.9);
+  add('/tools', 'monthly', 0.6);
   add('/filamentColors', 'monthly', 0.5);
   add('/aboutUs', 'monthly', 0.5);
   add('/terms', 'yearly', 0.2);
