@@ -8,10 +8,10 @@ import { loadSettings } from './studio.js';
 const router = express.Router();
 const SITE = () => (process.env.SITE_URL || 'https://www.3dpstl.com').replace(/\/$/, '');
 
-// Studio tools (ids from the frontend: src/Sources/studio/tools/index.js) — add new tools here too
+// Studio tools — the `id` inside each tool file in src/Sources/studio/tools/ (not the file name). Add new tools here too
 const STUDIO_TOOLS = [
-  'keychain', 'pencilTopper', 'initialSign', 'dualName', 'lbPlate', 'plate',
-  'keycaps', 'toteBag', 'flexiToy', 'birthSign', 'phoneCase',
+  'name-keychain', 'pencil-topper', 'initial-sign', 'dual-name', 'lebanese-plate', 'plate-keychain',
+  'keycaps', 'tpu-tote', 'flexi-toy', 'birth-sign', 'phone-case',
 ];
 
 const xmlEsc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]));
