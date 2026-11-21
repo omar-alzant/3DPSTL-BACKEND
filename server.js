@@ -21,6 +21,8 @@ import { guardWrites } from "./middleware/human.js";
 import { logRouter, systemRouter } from "./routes/system.js";
 import { logError } from "./services/errorLog.js";
 import { startBackupSchedule } from "./services/backup.js";
+import searchRouter from "./routes/search.js";
+import { startImageSearchSchedule } from "./services/imageSearch.js";
 
 dotenv.config(); // must be first!
 
@@ -74,6 +76,7 @@ app.use("/api/admin/filament/colors", filamentColorsRouter);
 app.use("/api/studio", studioRouter);
 app.use("/api/credits", creditsRouter);
 app.use("/api/system", systemRouter);
+app.use("/api/search", searchRouter);
 
 // WhatsApp webhook endpoints
 app.use('/webhook/whatsapp', whatsappWebhook);
@@ -106,4 +109,5 @@ const port = process.env.PORT || 8080;
 app.listen(port, () => {
   console.log(`API listening on :${port}`);
   startBackupSchedule();
+  startImageSearchSchedule();
 });

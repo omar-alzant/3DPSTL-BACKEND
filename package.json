@@ -19,6 +19,7 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "@supabase/supabase-js": "^2.55.0",
     "axios": "^1.11.0",
     "bcrypt": "^6.0.0",

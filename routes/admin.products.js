@@ -5,6 +5,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/admin.js';
 import {isBase64Image, isHttpUrl, isSupabaseStorageUrl, processImage, uploadToSupabase} from '../helper/Helper.js'
+import { indexSoon } from '../services/imageSearch.js';
 
 const router = express.Router();
 
@@ -628,7 +629,8 @@ router.get("/item", async (req, res) => {
       maxLen,
       onsale,
       include_hidden,
-      visibility // admin filter: 'hidden' | 'visible'
+      visibility, // admin filter: 'hidden' | 'visible'
+      similar // photo search: item ids, best match first
     } = req.query;
     const showHidden = include_hidden === 'true' && (await isAdminRequest(req));
 
@@ -669,6 +671,11 @@ router.get("/item", async (req, res) => {
     const term = likeTerm(q);
     if (term) query = query.ilike("name", `%${term}%`);
 
+    const similarIds = typeof similar === "string"
+      ? similar.split(",").filter((x) => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 50)
+      : [];
+    if (similar !== undefined) query = query.in("id", similarIds.length ? similarIds : ["00000000-0000-0000-0000-000000000000"]);
+
     if (model_id)
       query = query.in("model_id", model_id.split(","));
 
@@ -697,6 +704,12 @@ router.get("/item", async (req, res) => {
       .range(from, to);
 
     if (error) throw error;
+
+    // photo search: keep the "most similar first" order
+    if (similarIds.length) {
+      const rank = new Map(similarIds.map((id, i) => [id, i]));
+      data.sort((x, y) => (rank.get(x.id) ?? 999) - (rank.get(y.id) ?? 999));
+    }
 
     res.json({ items: data, total: count });
   } catch (err) {
@@ -996,6 +1009,7 @@ const { data: fullItem, error: fetchError } = await supabaseAdmin
   `)
   .eq("id", itemId)
   .single();
+   indexSoon(); // photo search: fingerprint the new photos
    if (fetchError) {
     console.error('Re-fetch error:', fetchError);
     return res.status(201).json({ id: itemId, message: 'Item created, but failed to fetch full response.' });
@@ -1193,6 +1207,7 @@ if (skuIdsToDelete.length > 0) {
     .eq("id", itemId)
     .single();
 
+    indexSoon(); // photo search: fingerprint changed photos
     if (fetchError) { console.error('Re-fetch after update error:', fetchError); 
     
     return res.json({ id: itemId, message: 'Item updated, but failed to fetch full response.' });

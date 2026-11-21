@@ -10,6 +10,8 @@ RUN apt-get update && apt-get install -y wget gnupg lsb-release \
 
 WORKDIR /app
 COPY package*.json ./
+# CPU only: do not download the (large) CUDA build of onnxruntime used by photo search
+ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
 RUN npm install --production
 COPY . .
 
