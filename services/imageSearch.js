@@ -14,7 +14,7 @@ const DTYPE = process.env.IMAGE_SEARCH_DTYPE || 'fp32'; // full-precision model;
 const MODEL_TAG = `clip-b32-${DTYPE}-trim-v2`;
 const PHOTOS_PER_ITEM = 3;
 // CLIP photo-to-photo similarity: ~0.9+ near-identical, ~0.75–0.85 same kind of object, ≤0.7 unrelated.
-const MIN_SCORE = Number(process.env.IMAGE_SEARCH_MIN || 0.9);
+const MIN_SCORE = Number(process.env.IMAGE_SEARCH_MIN || 0.75);
 const KEEP_WITHIN = 0.12; // and never far below the best match
 export const imageSearchEnabled = () => process.env.IMAGE_SEARCH !== 'off';
 
