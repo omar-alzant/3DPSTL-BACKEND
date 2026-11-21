@@ -9,9 +9,13 @@
 import { supabaseAdmin } from '../supabase.js';
 
 const MODEL = process.env.IMAGE_SEARCH_MODEL || 'Xenova/clip-vit-base-patch32';
-const MODEL_TAG = 'clip-vit-base-patch32';
+// bump the tag whenever the way photos are prepared changes → everything is fingerprinted again
+const DTYPE = process.env.IMAGE_SEARCH_DTYPE || 'fp32'; // full-precision model; set q8 on a small server (less accurate)
+const MODEL_TAG = `clip-b32-${DTYPE}-trim-v2`;
 const PHOTOS_PER_ITEM = 3;
-const MIN_SCORE = 0.5;
+// CLIP photo-to-photo similarity: ~0.9+ near-identical, ~0.75–0.85 same kind of object, ≤0.7 unrelated.
+const MIN_SCORE = Number(process.env.IMAGE_SEARCH_MIN || 0.9);
+const KEEP_WITHIN = 0.12; // and never far below the best match
 export const imageSearchEnabled = () => process.env.IMAGE_SEARCH !== 'off';
 
 let modelPromise = null;
@@ -23,7 +27,7 @@ function loadModel() {
       T.env.cacheDir = process.env.HF_CACHE_DIR || '/tmp/hf-cache';
       T.env.allowLocalModels = false;
       const processor = await T.AutoProcessor.from_pretrained(MODEL);
-      const model = await T.CLIPVisionModelWithProjection.from_pretrained(MODEL, { dtype: 'q8' });
+      const model = await T.CLIPVisionModelWithProjection.from_pretrained(MODEL, { dtype: DTYPE });
       console.log(`[image-search] model ready in ${Math.round((Date.now() - t0) / 1000)}s`);
       return { T, processor, model };
     })().catch((err) => {
@@ -34,10 +38,31 @@ function loadModel() {
   return modelPromise;
 }
 
+/** prepare a photo the same way for items and for customers: upright, without black/white bars
+ *  (reel frames have big letterbox bars), on white, and square-padded so the AI sees the whole object */
+async function preparePhoto(buffer) {
+  const sharp = (await import('sharp')).default;
+  let img = sharp(buffer, { failOn: 'none' }).rotate();
+  try {
+    const trimmed = await img.clone().trim({ threshold: 28 }).toBuffer({ resolveWithObject: true });
+    const meta = await img.metadata();
+    // only keep the trim when it removed bars, not half the picture
+    if (trimmed.info.width * trimmed.info.height > 0.25 * (meta.width || 1) * (meta.height || 1)) img = sharp(trimmed.data);
+  } catch {
+    // nothing to trim
+  }
+  const { data, info } = await img
+    .resize(320, 320, { fit: 'contain', background: '#ffffff' })
+    .flatten({ background: '#ffffff' })
+    .jpeg({ quality: 92 })
+    .toBuffer({ resolveWithObject: true });
+  return data;
+}
+
 /** fingerprint of one picture (Buffer of a jpeg/png/webp) → unit-length number array */
 export async function embedImage(buffer) {
   const { T, processor, model } = await loadModel();
-  const image = await T.RawImage.fromBlob(new Blob([buffer]));
+  const image = await T.RawImage.fromBlob(new Blob([await preparePhoto(buffer)]));
   const inputs = await processor(image);
   const { image_embeds } = await model(inputs);
   const v = Array.from(image_embeds.data);
@@ -78,7 +103,10 @@ export async function searchByImage(buffer, limit = 20) {
     for (let i = 0; i < q.length; i++) s += q[i] * r.v[i];
     if (s > (best.get(r.item_id) ?? -1)) best.set(r.item_id, s);
   }
-  const ranked = [...best.entries()].filter(([, s]) => s >= MIN_SCORE).sort((a, b) => b[1] - a[1]);
+  const sorted = [...best.entries()].sort((a, b) => b[1] - a[1]);
+  const top = sorted.length ? sorted[0][1] : 0;
+  const ranked = sorted.filter(([, s]) => s >= MIN_SCORE && s >= top - KEEP_WITHIN);
+  console.log(`[image-search] best ${top.toFixed(3)}, ${ranked.length} kept`, sorted.slice(0, 5).map(([, s]) => s.toFixed(3)).join(' '));
   if (!ranked.length) return [];
   // drop hidden items
   const ids = ranked.slice(0, limit * 3).map(([id]) => id);
@@ -146,6 +174,8 @@ export async function indexMissing() {
         }
       }
     }
+    // fingerprints made the old way are dropped
+    await supabaseAdmin.from('item_image_embeddings').delete().neq('model', MODEL_TAG);
     for (const r of existing) {
       if (wanted.has(`${r.item_id}|${r.image_url}`)) continue;
       await supabaseAdmin.from('item_image_embeddings').delete().eq('item_id', r.item_id).eq('image_url', r.image_url);
