@@ -705,6 +705,19 @@ router.get("/item", async (req, res) => {
   }
 });
 
+// Only real instagram.com post / reel links are stored (anything else becomes null)
+function cleanInstagramUrl(v) {
+  if (!v || typeof v !== 'string') return null;
+  try {
+    const u = new URL(v.trim());
+    if (!/^(www\.)?instagram\.com$/i.test(u.hostname) || u.protocol !== 'https:') return null;
+    const m = u.pathname.match(/^\/(?:[\w.]+\/)?(p|reel|reels|tv)\/([\w-]+)/);
+    return m ? `https://www.instagram.com/${m[1] === 'reels' ? 'reel' : m[1]}/${m[2]}/` : null;
+  } catch {
+    return null;
+  }
+}
+
 router.get('/item/:id', async (req, res) => {
   const { id } = req.params;
   const { data: item, error } = await supabaseAdmin
@@ -795,6 +808,7 @@ router.post('/item', authMiddleware, requireAdmin, async (req, res) => {
     const { 
       model_id, name, description, galleryurls, brands_ids, isSimple,
       short_description,
+      instagram_url,
       variants: newVariants // 🔑 KEY CHANGE: Extract variants array
     } = req.body;
     // console.log(galleryurls)
@@ -868,6 +882,7 @@ router.post('/item', authMiddleware, requireAdmin, async (req, res) => {
       issimple: isSimple,
       description: description ?? null,
       short_description: short_description ?? null,
+      instagram_url: cleanInstagramUrl(instagram_url),
       brands_ids: brands_ids,
       galleryurls: uploadedUrls,
       isdisabled: req.body.isdisabled === true || req.body.isdisabled === 'true',
@@ -1051,6 +1066,7 @@ router.put('/item/:itemId', authMiddleware, requireAdmin, async (req, res) => {
 
   // ---- UPDATE ITEM ----
   itemPatch.updated_at = new Date().toISOString();
+  if ('instagram_url' in itemPatch) itemPatch.instagram_url = cleanInstagramUrl(itemPatch.instagram_url);
   if ("isSimple" in itemPatch) {
     itemPatch.issimple = safeBool(itemPatch.isSimple);  
     delete itemPatch.isSimple;     // remove original key

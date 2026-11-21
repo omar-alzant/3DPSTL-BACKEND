@@ -13,6 +13,7 @@ const STUDIO_TOOLS = [
   'name-keychain', 'pencil-topper', 'initial-sign', 'dual-name', 'lebanese-plate', 'plate-keychain',
   'keycaps', 'tpu-tote', 'flexi-toy', 'birth-sign', 'phone-case',
   'qr-code', 'coaster', 'cookie-cutter', 'stamp', 'ramadan-tray', 'desk-organizer', 'lebanon-keychain',
+  'lithophane', 'photo-lampshade', 'vase', 'jigsaw-puzzle', 'clicker',
 ];
 
 const xmlEsc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]));
