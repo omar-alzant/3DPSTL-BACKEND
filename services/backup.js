@@ -1,13 +1,13 @@
-// services/backup.js — automatic daily database backup.
-// Every day after 03:00 (Beirut time) the server runs pg_dump, gzips it and uploads it to the
-// private Supabase Storage bucket "backups" (created automatically). The newest 14 are kept.
-// If a backup fails, an email is sent. Safe across restarts: it checks if today's file already exists.
+// services/backup.js — extra database backups (pg_dump → gzip → private Storage bucket "backups").
+// The project is on Supabase Pro, which already keeps a daily backup for 7 days
+// (Supabase → Database → Backups), so our own daily copy is OFF by default.
+// The "Backup now" button (Admin → System) still makes a copy on demand — handy before big changes.
 //
-// Railway variables: SUPABASE_DB_URL (already used by the manual Backup button)
-//                    BACKUP_DAILY=off  → turns the daily backup off
-//                    BACKUP_DAILY=on   → also run it on your own computer (needs PostgreSQL's pg_dump installed)
-// By default the daily backup runs only on Railway (the Dockerfile installs pg_dump there).
-//                    BACKUP_KEEP=14    → how many to keep
+// Railway variables: SUPABASE_DB_URL (needed for any copy)
+//                    BACKUP_DAILY=on   → also make our own copy every day after 03:00 Beirut (emails you if it fails)
+//                    BACKUP_KEEP=14    → how many copies to keep
+// Pictures and files in Supabase Storage are NOT in any database backup: run `npm run backup:storage`
+// on your computer to copy them (see scripts/backupStorage.js).
 import { spawn } from 'node:child_process';
 import zlib from 'node:zlib';
 import { supabaseAdmin } from '../supabase.js';
@@ -114,14 +114,12 @@ async function tick() {
 export const onRailway = () => !!(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_ENVIRONMENT_NAME || process.env.RAILWAY_PROJECT_ID);
 
 export function startBackupSchedule() {
-  if (process.env.BACKUP_DAILY === 'off') return console.log('backup: daily backup is off');
-  if (!onRailway() && process.env.BACKUP_DAILY !== 'on')
-    return console.log('backup: daily backup runs only on Railway (set BACKUP_DAILY=on to run it here)');
+  if (process.env.BACKUP_DAILY !== 'on')
+    return console.log('backup: our own daily copy is off (Supabase Pro keeps daily backups; set BACKUP_DAILY=on to add ours)');
   if (!process.env.SUPABASE_DB_URL) return console.warn('backup: SUPABASE_DB_URL not set — daily backup skipped');
   setTimeout(tick, 60_000); // a minute after start
   setInterval(tick, 30 * 60_000).unref?.();
 }
 
 /** is the daily backup active on this server? (shown on the admin System page) */
-export const dailyBackupOn = () =>
-  process.env.BACKUP_DAILY !== 'off' && !!process.env.SUPABASE_DB_URL && (onRailway() || process.env.BACKUP_DAILY === 'on');
+export const dailyBackupOn = () => process.env.BACKUP_DAILY === 'on' && !!process.env.SUPABASE_DB_URL;
