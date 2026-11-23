@@ -42,6 +42,7 @@ const DEFAULTS = () => ({
   startupMinutes: 5, // heating + calibration
   whatsapp: process.env.STUDIO_WHATSAPP || '96176118290',
   creditsPerDownload: 0, // كريدت لكل تنزيل ملف (إذا لم تُحدَّد قيمة للأداة)
+  showPrices: false, // show the estimated price to customers (the admin always sees it)
   payment: { whish: { number: '', name: '' }, neo: { number: '', name: '' }, note: '' }, // بيانات الدفع لشحن الكريدت
   tools: {}, // { [toolId]: { enabled, pricePerGram, minPrice, setupFee, credits } }
 });
@@ -103,7 +104,8 @@ function cleanSettings(b = {}) {
   const creditsPerDownload = Math.max(0, Math.min(1e6, parseInt(b.creditsPerDownload, 10) || 0));
   const acct = (a = {}) => ({ number: String(a.number || '').trim().slice(0, 40), name: String(a.name || '').trim().slice(0, 60) });
   const payment = { whish: acct(b.payment?.whish), neo: acct(b.payment?.neo), note: String(b.payment?.note || '').trim().slice(0, 500) };
-  return { value: { currency, pricePerGram, minPrice, colorFee, pricePerHour, printFlow, swapSeconds, startupMinutes, whatsapp, creditsPerDownload, payment, tools } };
+  const showPrices = b.showPrices === true;
+  return { value: { currency, pricePerGram, minPrice, colorFee, pricePerHour, printFlow, swapSeconds, startupMinutes, whatsapp, creditsPerDownload, showPrices, payment, tools } };
 }
 
 // Public: what the Studio uses to show prices
