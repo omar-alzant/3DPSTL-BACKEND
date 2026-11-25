@@ -204,6 +204,70 @@ router.post('/orders', authMiddleware, rateLimit, async (req, res) => {
   }
 });
 
+
+// ---------- Order files ----------
+// Tools that use the customer's own 3D file (the mold maker) can't be rebuilt from the design link,
+// so right after ordering the customer's browser sends the finished 3MF. Kept in a private bucket.
+const FILES_BUCKET = 'studio-files';
+const MAX_FILE = 60 * 1024 * 1024;
+let filesBucketReady = false;
+async function ensureFilesBucket() {
+  if (filesBucketReady) return;
+  const { data } = await supabaseAdmin.storage.getBucket(FILES_BUCKET);
+  if (!data) {
+    const { error } = await supabaseAdmin.storage.createBucket(FILES_BUCKET, { public: false });
+    if (error && !/exist/i.test(error.message)) throw error;
+  }
+  filesBucketReady = true;
+}
+const fileKey = (id) => `orders/${id}.3mf`;
+const validId = (id) => /^ST-\d{6}-[0-9A-F]{4}$/.test(id);
+
+// POST /api/studio/orders/:id/file — the customer who placed the order, within an hour of ordering
+router.post('/orders/:id/file', authMiddleware, rateLimit,
+  express.raw({ type: 'application/octet-stream', limit: MAX_FILE }),
+  async (req, res) => {
+    try {
+      const id = String(req.params.id || '');
+      if (!validId(id)) return res.status(400).json({ error: 'رقم الطلب غير صالح' });
+      const buf = req.body;
+      if (!Buffer.isBuffer(buf) || buf.length < 100) return res.status(400).json({ error: 'الملف فارغ' });
+      // a 3MF is a zip file: it starts with "PK"
+      if (buf[0] !== 0x50 || buf[1] !== 0x4b) return res.status(400).json({ error: 'الملف غير صالح' });
+
+      const { data: order, error } = await supabaseAdmin
+        .from(TABLE).select('id, user_id, created_at').eq('id', id).maybeSingle();
+      if (error) throw error;
+      if (!order || order.user_id !== req.id) return res.status(404).json({ error: 'الطلب غير موجود' });
+      if (Date.now() - new Date(order.created_at).getTime() > 60 * 60e3)
+        return res.status(403).json({ error: 'انتهت مدة رفع الملف لهذا الطلب' });
+
+      await ensureFilesBucket();
+      const up = await supabaseAdmin.storage.from(FILES_BUCKET)
+        .upload(fileKey(id), buf, { contentType: 'model/3mf', upsert: true });
+      if (up.error) throw up.error;
+      res.status(201).json({ ok: true });
+    } catch (err) {
+      console.error('studio order file error:', err.message);
+      res.status(500).json({ error: 'تعذّر حفظ الملف' });
+    }
+  });
+
+// GET /api/studio/orders/admin/:id/file — admin: a download link that works for 10 minutes
+router.get('/orders/admin/:id/file', authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!validId(id)) return res.status(400).json({ error: 'Bad order id' });
+    const { data, error } = await supabaseAdmin.storage.from(FILES_BUCKET)
+      .createSignedUrl(fileKey(id), 600, { download: `${id}-mold.3mf` });
+    if (error || !data?.signedUrl) return res.status(404).json({ error: 'No file was sent with this order' });
+    res.json({ url: data.signedUrl });
+  } catch (err) {
+    console.error('studio order file link error:', err.message);
+    res.status(500).json({ error: 'Failed to get the file' });
+  }
+});
+
 // GET /api/studio/orders/my — the logged-in customer's own Studio orders (shown in Profile → My Orders)
 router.get('/orders/my', authMiddleware, async (req, res) => {
   try {
