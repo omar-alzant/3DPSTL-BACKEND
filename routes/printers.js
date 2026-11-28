@@ -93,7 +93,8 @@ bridgeRouter.post('/report', bridgeAuth, async (req, res) => {
     res.json({ commands: fresh.map(({ id, printer_id, command }) => ({ id, printer_id, command })) });
   } catch (err) {
     console.error('bridge report error:', err.message);
-    res.status(500).json({ error: 'report failed' });
+    // the bridge has proved itself with its token, so it may see why (shown in its window)
+    res.status(500).json({ error: `report failed: ${err.message}` });
   }
 });
 
@@ -108,7 +109,7 @@ bridgeRouter.post('/ack', bridgeAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('bridge ack error:', err.message);
-    res.status(500).json({ error: 'ack failed' });
+    res.status(500).json({ error: `ack failed: ${err.message}` });
   }
 });
 
