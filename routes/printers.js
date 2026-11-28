@@ -47,6 +47,8 @@ function cleanStatus(s = {}) {
     bedTarget: num(s.bedTarget),
     model: str(s.model, 60),
     error: str(s.error, 200),
+    note: str(s.note, 200), // why the printer can't be reached
+    camera: str(s.camera, 200), // why there's no camera picture
   };
 }
 
@@ -54,8 +56,10 @@ bridgeRouter.post('/report', bridgeAuth, async (req, res) => {
   try {
     const list = Array.isArray(req.body?.printers) ? req.body.printers.slice(0, 20) : [];
     const now = new Date().toISOString();
+    const seenIds = new Set();
     const rows = list
       .filter((p) => /^[a-z0-9_-]{1,40}$/i.test(String(p?.id || '')))
+      .filter((p) => !seenIds.has(String(p.id)) && seenIds.add(String(p.id))) // one row per id
       .map((p) => ({
         id: String(p.id),
         name: str(p.name, 60) || String(p.id),
