@@ -148,6 +148,57 @@ function rateLimit(req, res, next) {
 const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
 
+// ---------- Shared design links: the pictures in them ----------
+// A design link can't carry an uploaded picture (too big), so "Copy design link" first stores each
+// picture here and puts its address in the link. Public bucket, named by the picture's own hash
+// (the same picture is stored once). Only PNG / JPEG / WebP, at most 1.5 MB, a few per minute per visitor.
+const SHARE_BUCKET = 'studio-shared';
+const SHARE_MAX = 1.5 * 1024 * 1024;
+const shareHits = new Map();
+let shareBucketReady = false;
+async function ensureShareBucket() {
+  if (shareBucketReady) return;
+  const { data } = await supabaseAdmin.storage.getBucket(SHARE_BUCKET);
+  if (!data) {
+    const { error } = await supabaseAdmin.storage.createBucket(SHARE_BUCKET, { public: true, fileSizeLimit: SHARE_MAX, allowedMimeTypes: ['image/png', 'image/jpeg', 'image/webp'] });
+    if (error && !/exist/i.test(error.message)) throw error;
+  }
+  shareBucketReady = true;
+}
+const MAGIC = {
+  png: (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47,
+  jpeg: (b) => b[0] === 0xff && b[1] === 0xd8,
+  webp: (b) => b.slice(0, 4).toString('ascii') === 'RIFF' && b.slice(8, 12).toString('ascii') === 'WEBP',
+};
+
+// POST /api/studio/share-image  { data: "data:image/png;base64,…" } → { url }
+router.post('/share-image', async (req, res) => {
+  try {
+    const now = Date.now();
+    const list = (shareHits.get(req.ip) || []).filter((t) => now - t < 10 * 60e3);
+    if (list.length >= 60) return res.status(429).json({ error: 'كتير محاولات، جرّب بعد شوي' });
+    list.push(now);
+    shareHits.set(req.ip, list);
+
+    const m = /^data:image\/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(req.body?.data || ''));
+    if (!m) return res.status(400).json({ error: 'صورة غير صالحة' });
+    const type = m[1] === 'jpg' ? 'jpeg' : m[1];
+    const buf = Buffer.from(m[2], 'base64');
+    if (!buf.length || buf.length > SHARE_MAX) return res.status(413).json({ error: 'الصورة كبيرة' });
+    if (!MAGIC[type](buf)) return res.status(400).json({ error: 'صورة غير صالحة' });
+
+    await ensureShareBucket();
+    const key = `img/${crypto.createHash('sha256').update(buf).digest('hex').slice(0, 40)}.${type === 'jpeg' ? 'jpg' : type}`;
+    const up = await supabaseAdmin.storage.from(SHARE_BUCKET).upload(key, buf, { contentType: `image/${type}`, upsert: true, cacheControl: '31536000' });
+    if (up.error) throw up.error;
+    const { data } = supabaseAdmin.storage.from(SHARE_BUCKET).getPublicUrl(key);
+    res.json({ url: data.publicUrl });
+  } catch (err) {
+    console.error('studio share image error:', err.message);
+    res.status(500).json({ error: 'تعذّر تجهيز الرابط' });
+  }
+});
+
 // POST /api/studio/orders — logged-in customers
 // login required (like shop orders): the order is linked to the customer's account
 router.post('/orders', authMiddleware, rateLimit, async (req, res) => {
