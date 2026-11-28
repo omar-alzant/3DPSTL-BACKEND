@@ -3,7 +3,7 @@ import express from 'express';
 import crypto from 'node:crypto';
 import { authMiddleware } from '../middleware/auth.js';
 import { supabaseAdmin } from '../supabase.js';
-import { notifyStudioOrder, confirmStudioOrder } from '../services/notify.js';
+import { notifyStudioOrder, confirmStudioOrder, readyStudioOrder } from '../services/notify.js';
 import { normalizeMapLink } from '../util/mapLink.js';
 
 const router = express.Router();
@@ -253,6 +253,68 @@ router.post('/orders/:id/file', authMiddleware, rateLimit,
     }
   });
 
+// ---------- Admin attachments (any file: STL, 3MF, photo, PDF…) on any order ----------
+// kept in the same private bucket, under orders/<id>/
+// storage keys must be plain ASCII, so the original name (Arabic too) is kept base64url-encoded in the key
+const keyName = (raw) => {
+  let n = '';
+  try { n = decodeURIComponent(String(raw || '')); } catch { n = String(raw || ''); }
+  n = n.split(/[\\/]/).pop().normalize('NFC').replace(/[\u0000-\u001f]/g, '').slice(-80) || 'file';
+  return Buffer.from(n, 'utf8').toString('base64url');
+};
+const nameFromKey = (k) => {
+  const enc = k.replace(/^[0-9a-z]+-/, '');
+  try { return Buffer.from(enc, 'base64url').toString('utf8') || k; } catch { return k; }
+};
+
+// POST /api/studio/orders/admin/:id/files — body = the file, header X-Filename = its name (a header the CORS setup already allows)
+router.post('/orders/admin/:id/files', authMiddleware, requireAdmin,
+  express.raw({ type: () => true, limit: MAX_FILE }),
+  async (req, res) => {
+    try {
+      const id = String(req.params.id || '');
+      if (!validId(id)) return res.status(400).json({ error: 'رقم الطلب غير صالح' });
+      const buf = req.body;
+      if (!Buffer.isBuffer(buf) || !buf.length) return res.status(400).json({ error: 'الملف فارغ' });
+      const { data: order, error } = await supabaseAdmin.from(TABLE).select('id').eq('id', id).maybeSingle();
+      if (error) throw error;
+      if (!order) return res.status(404).json({ error: 'الطلب غير موجود' });
+      await ensureFilesBucket();
+      const key = `orders/${id}/${Date.now().toString(36)}-${keyName(req.get('x-filename'))}`;
+      const up = await supabaseAdmin.storage.from(FILES_BUCKET)
+        .upload(key, buf, { contentType: req.get('content-type') || 'application/octet-stream', upsert: false });
+      if (up.error) throw up.error;
+      res.status(201).json({ ok: true });
+    } catch (err) {
+      console.error('studio admin file error:', err.message);
+      res.status(500).json({ error: 'تعذّر رفع الملف' });
+    }
+  });
+
+// GET /api/studio/orders/admin/:id/files — the order's attachments, each with a 10-minute download link
+router.get('/orders/admin/:id/files', authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!validId(id)) return res.status(400).json({ error: 'Bad order id' });
+    await ensureFilesBucket();
+    const { data: list, error } = await supabaseAdmin.storage.from(FILES_BUCKET).list(`orders/${id}`, { limit: 100, sortBy: { column: 'created_at', order: 'asc' } });
+    if (error) throw error;
+    const files = (list || []).filter((f) => f.name && f.id);
+    if (!files.length) return res.json([]);
+    const paths = files.map((f) => `orders/${id}/${f.name}`);
+    const { data: links, error: e2 } = await supabaseAdmin.storage.from(FILES_BUCKET).createSignedUrls(paths, 600);
+    if (e2) throw e2;
+    res.json(files.map((f, i) => ({
+      name: nameFromKey(f.name),
+      size: f.metadata?.size ?? null,
+      url: links?.[i]?.signedUrl || null,
+    })));
+  } catch (err) {
+    console.error('studio admin files list error:', err.message);
+    res.status(500).json({ error: 'Failed to list the files' });
+  }
+});
+
 // GET /api/studio/orders/admin/:id/file — admin: a download link that works for 10 minutes
 router.get('/orders/admin/:id/file', authMiddleware, requireAdmin, async (req, res) => {
   try {
@@ -283,6 +345,74 @@ router.get('/orders/my', authMiddleware, async (req, res) => {
   }
 });
 
+// POST /api/studio/orders/admin — admin adds an order by hand (phone call, WhatsApp, in the shop).
+// Not linked to a customer account; no emails are sent.
+router.post('/orders/admin', authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const name = str(b.customer?.name, 80);
+    const phone = str(b.customer?.phone, 30);
+    if (!name || !/^[+\d\s()-]{6,30}$/.test(phone))
+      return res.status(400).json({ error: 'الاسم ورقم الهاتف مطلوبان' });
+    const rawLocation = str(b.customer?.location, 600);
+    const location = rawLocation ? normalizeMapLink(rawLocation) : null;
+    if (rawLocation && !location)
+      return res.status(400).json({ error: 'رابط الموقع غير صالح — الصق رابطاً من Google Maps أو Apple Maps' });
+    const toolId = str(b.toolId, 60) || 'manual';
+    const params = b.params && typeof b.params === 'object' && !Array.isArray(b.params) ? b.params : {};
+    if (JSON.stringify(params).length > 800_000) return res.status(413).json({ error: 'التصميم كبير جداً' });
+    const status = STATUSES.includes(b.status) ? b.status : 'new';
+    const price = num(b.price);
+
+    const d = new Date();
+    const id = `ST-${d.toISOString().slice(2, 10).replace(/-/g, '')}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+    const row = {
+      id,
+      user_id: null,
+      status,
+      tool_id: toolId,
+      tool_name: str(b.toolName, 80) || null,
+      params: { ...params, manual: true },
+      customer_name: name,
+      customer_phone: phone,
+      customer_address: str(b.customer?.address, 300) || null,
+      customer_location: location,
+      qty: Math.min(500, Math.max(1, parseInt(b.qty, 10) || 1)),
+      notes: str(b.notes, 1000),
+      estimate: price != null && price >= 0 ? { grams: null, minutes: null, price, currency: str(b.currency, 8) || 'USD' } : null,
+    };
+    const { data, error } = await supabaseAdmin.from(TABLE).insert(row).select('*').single();
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (err) {
+    console.error('studio admin order error:', err.message);
+    res.status(500).json({ error: 'تعذّر حفظ الطلب' });
+  }
+});
+
+// POST /api/studio/orders/admin/:id/notify-ready — admin: email the customer that the order is ready
+// (only orders placed from a customer account have an email; WhatsApp is opened from the admin's browser)
+router.post('/orders/admin/:id/notify-ready', authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!validId(id)) return res.status(400).json({ error: 'Bad order id' });
+    const { data: o, error } = await supabaseAdmin.from(TABLE).select('*').eq('id', id).maybeSingle();
+    if (error) throw error;
+    if (!o) return res.status(404).json({ error: 'الطلب غير موجود' });
+    if (!o.user_id) return res.status(400).json({ error: 'هالطلب مش مربوط بحساب، فما في إيميل' });
+    const { data: u, error: e2 } = await supabaseAdmin.auth.admin.getUserById(o.user_id);
+    if (e2) throw e2;
+    const email = u?.user?.email;
+    if (!email) return res.status(400).json({ error: 'ما في إيميل لهالزبون' });
+    const ok = await readyStudioOrder({ ...o, email }, str(req.body?.message, 1000));
+    if (!ok) return res.status(502).json({ error: 'ما انبعت الإيميل، جرّب كمان شوي' });
+    res.json({ ok: true, email });
+  } catch (err) {
+    console.error('studio ready email error:', err.message);
+    res.status(500).json({ error: 'تعذّر إرسال الإيميل' });
+  }
+});
+
 // GET /api/studio/orders/admin — admin only
 router.get('/orders/admin', authMiddleware, requireAdmin, async (req, res) => {
   try {
@@ -300,11 +430,61 @@ router.get('/orders/admin', authMiddleware, requireAdmin, async (req, res) => {
 // PATCH /api/studio/orders/admin/:id — admin only (status)
 router.patch('/orders/admin/:id', authMiddleware, requireAdmin, async (req, res) => {
   try {
-    const status = req.body?.status;
-    if (!STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+    const b = req.body || {};
+    const patch = {};
+    // only the fields that were sent change
+    if (b.status !== undefined) {
+      if (!STATUSES.includes(b.status)) return res.status(400).json({ error: 'Invalid status' });
+      patch.status = b.status;
+    }
+    if (b.customer) {
+      const c = b.customer;
+      if (c.name !== undefined) {
+        const name = str(c.name, 80);
+        if (!name) return res.status(400).json({ error: 'الاسم مطلوب' });
+        patch.customer_name = name;
+      }
+      if (c.phone !== undefined) {
+        const phone = str(c.phone, 30);
+        if (!/^[+\d\s()-]{6,30}$/.test(phone)) return res.status(400).json({ error: 'رقم الهاتف غير صالح' });
+        patch.customer_phone = phone;
+      }
+      if (c.address !== undefined) patch.customer_address = str(c.address, 300) || null;
+      if (c.location !== undefined) {
+        const raw = str(c.location, 600);
+        const loc = raw ? normalizeMapLink(raw) : null;
+        if (raw && !loc) return res.status(400).json({ error: 'رابط الموقع غير صالح — الصق رابطاً من Google Maps أو Apple Maps' });
+        patch.customer_location = loc;
+      }
+    }
+    if (b.qty !== undefined) patch.qty = Math.min(500, Math.max(1, parseInt(b.qty, 10) || 1));
+    if (b.notes !== undefined) patch.notes = str(b.notes, 1000);
+    if (b.toolId !== undefined) patch.tool_id = str(b.toolId, 60) || 'manual';
+    if (b.toolName !== undefined) patch.tool_name = str(b.toolName, 80) || null;
+
+    // price and the "what" line live inside JSON columns: merge with what is there
+    if (b.price !== undefined || b.what !== undefined) {
+      const { data: cur, error: e0 } = await supabaseAdmin.from(TABLE).select('estimate, params').eq('id', req.params.id).maybeSingle();
+      if (e0) throw e0;
+      if (!cur) return res.status(404).json({ error: 'Order not found' });
+      if (b.price !== undefined) {
+        const price = b.price === null || b.price === '' ? null : num(b.price);
+        const est = cur.estimate || {};
+        patch.estimate = price == null ? (est.grams || est.minutes ? { ...est, price: null } : null) : { ...est, price, currency: est.currency || 'USD' };
+      }
+      if (b.what !== undefined) {
+        const what = str(b.what, 200);
+        const params = { ...(cur.params || {}) };
+        if (what) params.what = what; else delete params.what;
+        patch.params = params;
+      }
+    }
+    if (!Object.keys(patch).length) return res.status(400).json({ error: 'Nothing to change' });
+    patch.updated_at = new Date().toISOString();
+
     const { data, error } = await supabaseAdmin
       .from(TABLE)
-      .update({ status, updated_at: new Date().toISOString() })
+      .update(patch)
       .eq('id', req.params.id)
       .select()
       .maybeSingle();

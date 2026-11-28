@@ -219,6 +219,23 @@ export function confirmStudioOrder(o) {
   );
 }
 
+/** للزبون: طلب الطباعة جاهز (يرسله الأدمن من صفحة طلبات الاستوديو) */
+export function readyStudioOrder(o, message) {
+  const body = String(message || '').trim();
+  return toCustomer(
+    o.email,
+    `🎉 طلبك ${o.id} جاهز — 3DSTL`,
+    `${esc(o.customer_name)}، طلبك جاهز!`,
+    `${body ? `<p style="white-space:pre-line">${esc(body)}</p>` : ''}
+    ${table([
+      ['رقم الطلب', esc(o.id)],
+      ['التصميم', esc(o.tool_name || o.tool_id)],
+      ['الكمية', esc(o.qty)],
+    ])}`,
+    body || `طلبك ${o.id} جاهز. 3DSTL`,
+  );
+}
+
 /** تأكيد استلام طلب الشحن للزبون */
 export function confirmCreditRequest(r) {
   return toCustomer(
