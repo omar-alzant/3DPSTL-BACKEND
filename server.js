@@ -15,6 +15,7 @@ import sitemapRouter from './routes/sitemap.js';
 import backupRouter from "./routes/backup.js";
 import filamentColorsRouter from "./routes/adminFilamentColors.js";
 import studioRouter from "./routes/studio.js";
+import printersRouter, { bridgeRouter } from "./routes/printers.js";
 import humanRouter from "./routes/human.js";
 import creditsRouter from "./routes/credits.js";
 import { guardWrites } from "./middleware/human.js";
@@ -63,6 +64,7 @@ app.get('/health', (_, res) => res.json({ ok: true }));
 // التحقق البشري: نقطة التحقق + حماية كل طلبات الكتابة على /api (القراءة مفتوحة لمحركات البحث)
 app.use('/api/human', humanRouter);
 app.use('/api/log', logRouter); // crash reports from browsers — before guardWrites so they always get through
+app.use('/api/printers/bridge', bridgeRouter); // the shop's bridge program (its own token, no browser check)
 app.use('/api', guardWrites);
 app.use('/api/products', products);
 app.use('/api/admin/products', adminProducts);
@@ -74,6 +76,7 @@ app.use("/api/category", categoryRouter);
 app.use("/api/admin/backup", backupRouter);
 app.use("/api/admin/filament/colors", filamentColorsRouter);
 app.use("/api/studio", studioRouter);
+app.use("/api/printers", printersRouter);
 app.use("/api/credits", creditsRouter);
 app.use("/api/system", systemRouter);
 app.use("/api/search", searchRouter);
