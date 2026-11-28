@@ -496,4 +496,28 @@ router.patch('/orders/admin/:id', authMiddleware, requireAdmin, async (req, res)
   }
 });
 
+// DELETE /api/studio/orders/admin/:id — admin: remove an order for good, with its files
+router.delete('/orders/admin/:id', authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!validId(id)) return res.status(400).json({ error: 'Bad order id' });
+    // files first (attachments under orders/<id>/ and the mold file orders/<id>.3mf); a missing bucket is fine
+    try {
+      const { data: list } = await supabaseAdmin.storage.from(FILES_BUCKET).list(`orders/${id}`, { limit: 1000 });
+      const paths = (list || []).filter((f) => f.name).map((f) => `orders/${id}/${f.name}`);
+      paths.push(fileKey(id));
+      await supabaseAdmin.storage.from(FILES_BUCKET).remove(paths);
+    } catch (e) {
+      console.warn('studio order delete: files', e.message);
+    }
+    const { data, error } = await supabaseAdmin.from(TABLE).delete().eq('id', id).select('id');
+    if (error) throw error;
+    if (!data?.length) return res.status(404).json({ error: 'Order not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('studio order delete error:', err.message);
+    res.status(500).json({ error: 'تعذّر حذف الطلب' });
+  }
+});
+
 export default router;
