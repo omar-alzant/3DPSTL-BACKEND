@@ -464,6 +464,45 @@ router.post('/orders/admin/:id/notify-ready', authMiddleware, requireAdmin, asyn
   }
 });
 
+// ---------- Linking an order to a customer account ----------
+// (an order made for someone with no account yet: once they sign up, the admin links it, so it shows in their orders)
+const digits = (v) => String(v || '').replace(/\D/g, '');
+const lastDigits = (v) => digits(v).slice(-8); // Lebanese numbers: match on the last 8 digits (with or without 961 / 0)
+
+/** profiles that match an email, or a phone number */
+async function findAccounts(q) {
+  const t = String(q || '').trim();
+  if (!t) return [];
+  if (t.includes('@')) {
+    const { data, error } = await supabaseAdmin.from('profiles').select('id, full_name, email, phone').ilike('email', t.replace(/[%_]/g, '\\$&')).limit(5);
+    if (error) throw error;
+    return data || [];
+  }
+  const d = lastDigits(t);
+  if (d.length < 7) return [];
+  const { data, error } = await supabaseAdmin.from('profiles').select('id, full_name, email, phone').ilike('phone', `%${d.slice(-7)}%`).limit(20);
+  if (error) throw error;
+  return (data || []).filter((p) => lastDigits(p.phone) === d).slice(0, 5);
+}
+
+/** each order gets `account` = { email, name } of the linked customer (admin list only) */
+async function withAccounts(orders) {
+  const ids = [...new Set((orders || []).map((o) => o.user_id).filter(Boolean))];
+  if (!ids.length) return orders;
+  const { data } = await supabaseAdmin.from('profiles').select('id, full_name, email').in('id', ids);
+  const by = new Map((data || []).map((p) => [p.id, { email: p.email, name: p.full_name }]));
+  return orders.map((o) => (o.user_id ? { ...o, account: by.get(o.user_id) || { email: null, name: null } } : o));
+}
+
+// GET /api/studio/orders/admin/accounts?q=email-or-phone — admin: find a customer account to link
+router.get('/orders/admin/accounts', authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    res.json(await findAccounts(str(req.query.q, 120)));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/studio/orders/admin — admin only
 router.get('/orders/admin', authMiddleware, requireAdmin, async (req, res) => {
   try {
@@ -472,7 +511,7 @@ router.get('/orders/admin', authMiddleware, requireAdmin, async (req, res) => {
       .select('*')
       .order('created_at', { ascending: false });
     if (error) throw error;
-    res.json(data);
+    res.json(await withAccounts(data));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -508,6 +547,16 @@ router.patch('/orders/admin/:id', authMiddleware, requireAdmin, async (req, res)
         patch.customer_location = loc;
       }
     }
+    // link to a customer account (by its id, found with /orders/admin/accounts), or unlink with null
+    if (b.userId !== undefined) {
+      if (b.userId === null || b.userId === '') patch.user_id = null;
+      else {
+        const { data: prof, error: ep } = await supabaseAdmin.from('profiles').select('id').eq('id', String(b.userId)).maybeSingle();
+        if (ep) throw ep;
+        if (!prof) return res.status(400).json({ error: 'الحساب غير موجود' });
+        patch.user_id = prof.id;
+      }
+    }
     if (b.qty !== undefined) patch.qty = Math.min(500, Math.max(1, parseInt(b.qty, 10) || 1));
     if (b.notes !== undefined) patch.notes = str(b.notes, 1000);
     if (b.toolId !== undefined) patch.tool_id = str(b.toolId, 60) || 'manual';
@@ -541,7 +590,7 @@ router.patch('/orders/admin/:id', authMiddleware, requireAdmin, async (req, res)
       .maybeSingle();
     if (error) throw error;
     if (!data) return res.status(404).json({ error: 'Order not found' });
-    res.json(data);
+    res.json((await withAccounts([data]))[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
